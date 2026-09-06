@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">Habit</string>
+    <string name="accessibility_service_description">Habit ilovasi band vaqtda chalg\'ituvchi ilovalarni aniqlab, ularni bloklash va uy ekraniga qaytarish uchun ushbu xizmatdan foydalanadi.</string>
+    <string name="notification_channel_location">Habit Joylashuv Xizmati</string>
+    <string name="notification_channel_location_desc">GPS orqali belgilangan joylarga (RTM, Maktab) yetib kelishni aniqlaydi.</string>
+    <string name="notification_channel_alarm">Habit Kun Tartibi Alarmi</string>
+    <string name="notification_channel_alarm_desc">Vazifa vaqti yakunlanganda to\'liq ekranli signal bildirishnomasi.</string>
+    <string name="service_location_running_title">Habit joylashuvni kuzatmoqda</string>
+    <string name="service_location_running_text">RTM va Maktab hududiga kelish hamda kun tartibi nazorat qilinmoqda.</string>
+</resources>

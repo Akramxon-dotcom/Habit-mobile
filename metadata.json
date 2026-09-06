@@ -1,0 +1,6 @@
+{
+  "name": "Habit",
+  "description": "Shaxsiy kun tartibi hamrohi — GPS kelishni aniqlash, to'liq ekranli alarm va chalg'ituvchi ilovalarni bloklash xizmati",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
