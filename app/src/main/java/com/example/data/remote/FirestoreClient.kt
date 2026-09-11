@@ -103,6 +103,51 @@ object FirestoreClient {
         }
     }
 
+    suspend fun updateTaskState(
+        title: String,
+        category: String,
+        start: String,
+        end: String,
+        note: String,
+        blocking: Boolean
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val url = "$BASE_URL?updateMask.fieldPaths=title&updateMask.fieldPaths=category&updateMask.fieldPaths=start&updateMask.fieldPaths=end&updateMask.fieldPaths=note&updateMask.fieldPaths=blocking&key=$API_KEY"
+
+            val fieldsObj = JSONObject().apply {
+                put("title", JSONObject().put("stringValue", title))
+                put("category", JSONObject().put("stringValue", category))
+                put("start", JSONObject().put("stringValue", start))
+                put("end", JSONObject().put("stringValue", end))
+                put("note", JSONObject().put("stringValue", note))
+                put("blocking", JSONObject().put("booleanValue", blocking))
+            }
+            val payload = JSONObject().apply {
+                put("fields", fieldsObj)
+            }
+
+            val requestBody = payload.toString().toRequestBody(jsonMediaType)
+            val request = Request.Builder()
+                .url(url)
+                .patch(requestBody)
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string()
+                if (response.isSuccessful) {
+                    Log.d(TAG, "Vazifa Firestore'da muvaffaqiyatli yangilandi: $title ($start - $end)")
+                    Result.success(true)
+                } else {
+                    Log.e(TAG, "updateTaskState xatolik: HTTP ${response.code} $responseBody")
+                    Result.failure(Exception("HTTP ${response.code}: $responseBody"))
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "updateTaskState istisno: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
     suspend fun patchAlarmAnswer(answer: String, taskTitle: String, isoTimestamp: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             val url = "$BASE_URL?updateMask.fieldPaths=lastAnswer&updateMask.fieldPaths=lastAnsweredTitle&updateMask.fieldPaths=lastAnswerTime&key=$API_KEY"

@@ -13,6 +13,7 @@ import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.widget.Toast
 import com.example.data.local.HabitPreferences
+import com.example.data.model.TaskTimeEngine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -86,9 +87,18 @@ class HabitBlockerService : AccessibilityService() {
             return
         }
 
-        // Check if blocking is active in Firestore
-        val isBlocking = prefs.isBlockingActive
-        if (!isBlocking) return
+        // Check if master blocker is paused by user
+        if (prefs.isBlockerPaused) {
+            return
+        }
+
+        // Check if blocking is active in real time (Firestore state or local schedule)
+        val cached = prefs.getCachedState()
+        val isFirestoreActive = prefs.isBlockingActive && TaskTimeEngine.isTaskActiveNow(cached.start, cached.end)
+        val activeScheduleItem = TaskTimeEngine.findActiveScheduleItem(prefs.getSchedule())
+        val isScheduleActive = activeScheduleItem?.blocking == true
+
+        if (!isFirestoreActive && !isScheduleActive) return
 
         val blockedPackages = prefs.getBlockedPackagesList()
         val isBlockedApp = blockedPackages.any { it.equals(packageName, ignoreCase = true) }

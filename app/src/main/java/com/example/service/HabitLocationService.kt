@@ -215,47 +215,36 @@ class HabitLocationService : Service() {
         val radius = prefs.radiusMeters
         val distanceResults = FloatArray(1)
 
-        // Check RTM
-        val rtmLat = prefs.rtmLat
-        val rtmLng = prefs.rtmLng
-        Location.distanceBetween(currentLat, currentLng, rtmLat, rtmLng, distanceResults)
-        val distanceToRtm = distanceResults[0]
+        // Check all custom locations configured by user
+        val customLocations = prefs.getCustomLocations().filter { it.isEnabled }
+        for (loc in customLocations) {
+            Location.distanceBetween(currentLat, currentLng, loc.lat, loc.lng, distanceResults)
+            val distance = distanceResults[0]
+            val effectiveRadius = if (loc.radiusMeters > 0) loc.radiusMeters else radius
 
-        if (distanceToRtm <= radius) {
-            Log.d(TAG, "RTM hududiga kirildi! Masofa: $distanceToRtm m")
-            if (prefs.canRecordArrivalRtm(nowMs)) {
-                prefs.markArrivalRtm(nowMs)
-                updateNotificationText("RTM ga kelindi ($isoTimestamp)")
-                serviceScope.launch {
-                    val res = FirestoreClient.patchArrival("RTM", isoTimestamp)
-                    if (res.isSuccess) {
-                        Log.d(TAG, "Firestore'ga RTM kelishi muvaffaqiyatli saqlandi")
+            if (distance <= effectiveRadius) {
+                Log.d(TAG, "${loc.name} hududiga kirildi! Masofa: $distance m")
+                val key = "last_arrival_${loc.id}"
+                val lastTime = prefs.getLong(key, 0L)
+                if ((nowMs - lastTime) >= HabitPreferences.COOLDOWN_MS) {
+                    prefs.putLong(key, nowMs)
+                    updateNotificationText("${loc.name} ga kelindi ($isoTimestamp)")
+                    _lastDetectedLocation.value = "${loc.name} (Masofa: ${distance.toInt()}m)"
+
+                    serviceScope.launch {
+                        FirestoreClient.patchArrival(loc.name, isoTimestamp)
+                    }
+
+                    // If configured to trigger task or wallpaper
+                    if (loc.targetHabitTitle.isNotBlank()) {
+                        com.example.service.HabitNotificationHelper.showActiveTaskNotification(applicationContext)
+                        if (prefs.isAiWallpaperEnabled) {
+                            serviceScope.launch {
+                                com.example.service.AiWallpaperManager.updateWallpaperForCurrentTask(applicationContext)
+                            }
+                        }
                     }
                 }
-            } else {
-                Log.d(TAG, "RTM: 30 daqiqalik oraliq hali tugamagan.")
-            }
-        }
-
-        // Check Maktab
-        val maktabLat = prefs.maktabLat
-        val maktabLng = prefs.maktabLng
-        Location.distanceBetween(currentLat, currentLng, maktabLat, maktabLng, distanceResults)
-        val distanceToMaktab = distanceResults[0]
-
-        if (distanceToMaktab <= radius) {
-            Log.d(TAG, "Maktab hududiga kirildi! Masofa: $distanceToMaktab m")
-            if (prefs.canRecordArrivalMaktab(nowMs)) {
-                prefs.markArrivalMaktab(nowMs)
-                updateNotificationText("Maktabga kelindi ($isoTimestamp)")
-                serviceScope.launch {
-                    val res = FirestoreClient.patchArrival("Maktab", isoTimestamp)
-                    if (res.isSuccess) {
-                        Log.d(TAG, "Firestore'ga Maktab kelishi muvaffaqiyatli saqlandi")
-                    }
-                }
-            } else {
-                Log.d(TAG, "Maktab: 30 daqiqalik oraliq hali tugamagan.")
             }
         }
     }
@@ -281,35 +270,18 @@ class HabitLocationService : Service() {
             val state = result.getOrThrow()
             prefs.saveCachedState(state)
 
-            // Check if end time passed and alarm hasn't been answered yet
-            if (state.title.isNotBlank() && isPastEndTime(state.end)) {
-                val answered = prefs.isAlarmAnswered(state.title, state.end)
-                if (!answered) {
-                    Log.d(TAG, "Vazifa muddati o'tgan va javob berilmagan: ${state.title} (${state.end})")
-                    AlarmHelper.triggerAlarmNow(
-                        context = this@HabitLocationService,
-                        title = state.title,
-                        category = state.category,
-                        endTime = state.end,
-                        note = state.note
-                    )
-                }
+            if (state.title.isNotBlank() && state.end.isNotBlank()) {
+                val status = AlarmHelper.scheduleTaskAlarm(
+                    context = this@HabitLocationService,
+                    title = state.title,
+                    category = state.category,
+                    startTime = state.start,
+                    endTime = state.end,
+                    note = state.note
+                )
+                Log.d(TAG, "Poller alarm rejalashtirish holati: $status")
             }
         }
-    }
-
-    private fun isPastEndTime(endTimeStr: String): Boolean {
-        if (endTimeStr.isBlank()) return false
-        val parts = endTimeStr.trim().split(":")
-        if (parts.size != 2) return false
-        val endHour = parts[0].toIntOrNull() ?: return false
-        val endMinute = parts[1].toIntOrNull() ?: return false
-
-        val cal = Calendar.getInstance()
-        val nowHour = cal.get(Calendar.HOUR_OF_DAY)
-        val nowMinute = cal.get(Calendar.MINUTE)
-
-        return (nowHour > endHour) || (nowHour == endHour && nowMinute >= endMinute)
     }
 
     private fun stopForegroundService() {

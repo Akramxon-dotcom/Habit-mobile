@@ -5,32 +5,35 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-private val HabitColorScheme = darkColorScheme(
-  primary = HabitGold,
-  onPrimary = HabitDarkBg,
-  primaryContainer = HabitGoldDark,
-  onPrimaryContainer = HabitGoldLight,
-  secondary = HabitGoldLight,
-  onSecondary = HabitDarkBg,
-  background = HabitDarkBg,
-  onBackground = HabitTextPrimary,
-  surface = HabitCardBg,
-  onSurface = HabitTextPrimary,
-  surfaceVariant = HabitCardElevated,
-  onSurfaceVariant = HabitTextSecondary,
-  outline = HabitBorder,
-  error = HabitError,
-  onError = Color.White
-)
-
 @Composable
 fun HabitTheme(
+  themeStyle: LiquidGlassStyle = LiquidGlassStyles.Emerald,
   content: @Composable () -> Unit,
 ) {
-  MaterialTheme(
-    colorScheme = HabitColorScheme,
-    typography = Typography,
-    content = content
+  val dynamicScheme = darkColorScheme(
+    primary = themeStyle.primaryAccent,
+    onPrimary = Color.Black,
+    primaryContainer = themeStyle.accentSecondary,
+    onPrimaryContainer = Color.White,
+    secondary = themeStyle.accentTertiary,
+    onSecondary = Color.Black,
+    background = themeStyle.bgBottom,
+    onBackground = themeStyle.textPrimary,
+    surface = themeStyle.glassSurfaceElevated,
+    onSurface = themeStyle.textPrimary,
+    surfaceVariant = themeStyle.glassSurface,
+    onSurfaceVariant = themeStyle.textSecondary,
+    outline = themeStyle.glassBorderColor1,
+    error = Color(0xFFEF4444),
+    onError = Color.White
   )
+
+  ProvideLiquidTheme(theme = themeStyle) {
+    MaterialTheme(
+      colorScheme = dynamicScheme,
+      typography = Typography,
+      content = content
+    )
+  }
 }
 

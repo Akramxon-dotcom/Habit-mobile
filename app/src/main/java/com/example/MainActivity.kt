@@ -80,8 +80,10 @@ class MainActivity : ComponentActivity() {
         AlarmHelper.createNotificationChannels(this)
 
         setContent {
-            HabitTheme {
-                val uiState by viewModel.uiState.collectAsState()
+            val uiState by viewModel.uiState.collectAsState()
+            val liquidTheme = com.example.ui.theme.LiquidGlassStyles.getById(uiState.selectedThemeId)
+
+            HabitTheme(themeStyle = liquidTheme) {
                 val snackbarHostState = remember { SnackbarHostState() }
                 var showPermissionsDialog by remember { mutableStateOf(false) }
 
@@ -93,11 +95,12 @@ class MainActivity : ComponentActivity() {
 
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
-                    containerColor = HabitDarkBg,
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
                     snackbarHost = { SnackbarHost(snackbarHostState) }
                 ) { innerPadding ->
                     HomeScreen(
                         state = uiState,
+                        onSelectTheme = { themeId -> viewModel.setLiquidTheme(themeId) },
                         onRefresh = { viewModel.refreshFirestoreState() },
                         onToggleLocationService = {
                             if (!uiState.permissionStatus.hasFineLocation) {
@@ -115,12 +118,152 @@ class MainActivity : ComponentActivity() {
                         onTestAlarm = {
                             viewModel.testTriggerAlarm()
                         },
+                        onScheduleTestAlarm = { seconds ->
+                            viewModel.scheduleTestAlarm(seconds)
+                        },
                         onSaveGeofence = { rtmLat, rtmLng, maktabLat, maktabLng, radius ->
                             viewModel.saveGeofenceSettings(rtmLat, rtmLng, maktabLat, maktabLng, radius)
                         },
                         onSaveBlockedPackages = { packages ->
                             viewModel.saveBlockedApps(packages)
-                        }
+                        },
+                        onActivateScheduleItem = { item ->
+                            viewModel.activateScheduleItem(item)
+                        },
+                        onAddScheduleItem = { title, cat, start, end, note, blocking ->
+                            viewModel.addScheduleItem(title, cat, start, end, note, blocking)
+                        },
+                        onDeleteScheduleItem = { id ->
+                            viewModel.deleteScheduleItem(id)
+                        },
+                        onUpdateCurrentTask = { title, cat, start, end, note, blocking ->
+                            viewModel.updateCurrentTaskInFirestore(title, cat, start, end, note, blocking)
+                        },
+                        onMarkTaskCompleted = { item ->
+                            viewModel.markTaskCompleted(item)
+                        },
+                        onDelaySchedule = { minutes ->
+                            viewModel.delaySchedule(minutes)
+                        },
+                        onSelectTab = { tab ->
+                            viewModel.selectTab(tab)
+                        },
+                        onSelectDayOffset = { offset ->
+                            viewModel.selectDayOffset(offset)
+                        },
+                        onRefreshWeather = {
+                            viewModel.refreshWeather()
+                        },
+                        onToggleAiWallpaper = { enabled ->
+                            viewModel.toggleAiWallpaper(enabled)
+                        },
+                        onSetWallpaperTarget = { target ->
+                            viewModel.setWallpaperTarget(target)
+                        },
+                        onPickWallpaperImage = { uri ->
+                            viewModel.onCustomWallpaperSelected(uri)
+                        },
+                        onClearCustomWallpaper = {
+                            viewModel.onClearCustomWallpaper()
+                        },
+                        onApplyAiWallpaperNow = {
+                            viewModel.applyAiWallpaperNow()
+                        },
+                        onSaveTelegramSettings = { token, chatId ->
+                            viewModel.saveTelegramSettings(token, chatId)
+                        },
+                        onSendTelegramReport = {
+                            viewModel.sendTelegramReport()
+                        },
+                        onAddWordWithAi = { word ->
+                            viewModel.addWordWithAi(word)
+                        },
+                        onDeleteVocabCard = { id ->
+                            viewModel.deleteVocabCard(id)
+                        },
+                        onUpdateVocabBoxLevel = { id, level ->
+                            viewModel.updateVocabBoxLevel(id, level)
+                        },
+                        onGenerateQuiz = {
+                            viewModel.generateQuiz()
+                        },
+                        onCloseQuiz = {
+                            viewModel.closeQuiz()
+                        },
+                        onSaveDailyJournal = { stars, highlights, challenges, reflections ->
+                            viewModel.saveDailyJournal(stars, highlights, challenges, reflections)
+                        },
+                        onUnlockApp = {
+                            viewModel.unlockApp()
+                        },
+                        onSetSmartAddOpen = { isOpen ->
+                            viewModel.setSmartAddOpen(isOpen)
+                        },
+                        onSetQiblaOpen = { isOpen ->
+                            viewModel.setQiblaOpen(isOpen)
+                        },
+                        onSetBreathOpen = { isOpen ->
+                            viewModel.setBreathOpen(isOpen)
+                        },
+                        onSetMotionOpen = { isOpen ->
+                            viewModel.setMotionOpen(isOpen)
+                        },
+                        onSyncSupabase = {
+                            viewModel.syncWithSupabase()
+                        },
+                        onReplanWithAi = {
+                            viewModel.replanWithAi()
+                        },
+                        onAddNewTask = { item ->
+                            viewModel.addScheduleItem(
+                                title = item.title,
+                                category = item.category,
+                                start = item.start,
+                                end = item.end,
+                                note = item.note,
+                                blocking = item.blocking
+                            )
+                        },
+                        onDelayTaskWithReason = { task, reason ->
+                            viewModel.delayTaskWithReason(task, reason)
+                        },
+                        onToggleBlockerPaused = { paused ->
+                            viewModel.toggleBlockerPaused(paused)
+                        },
+                        onOpenAppPicker = {
+                            viewModel.setAppPickerOpen(true)
+                        },
+                        onCloseAppPicker = {
+                            viewModel.setAppPickerOpen(false)
+                        },
+                        onToggleAppBlocked = { pkg, blocked ->
+                            viewModel.toggleAppBlocked(pkg, blocked)
+                        },
+                        onCaptureCurrentLocation = { callback ->
+                            viewModel.captureCurrentGpsLocation(callback)
+                        },
+                        onAddCustomLocation = { name, lat, lng, rad, act, habit ->
+                            viewModel.addCustomLocation(name, lat, lng, rad, act, habit)
+                        },
+                        onDeleteCustomLocation = { id ->
+                            viewModel.deleteCustomLocation(id)
+                        },
+                        onToggleCustomLocation = { id, enabled ->
+                            viewModel.toggleCustomLocation(id, enabled)
+                        },
+                        onSaveUserGeminiApiKey = { key ->
+                            viewModel.saveUserGeminiApiKey(key)
+                        },
+                        onToggleAlarmMute = { muted -> viewModel.toggleAlarmMute(muted) },
+                        onSetAlarmVolume = { vol -> viewModel.setAlarmVolume(vol) },
+                        onSetAlarmSoundTone = { tone -> viewModel.setAlarmSoundTone(tone) },
+                        onPlayTestAlarmSound = { viewModel.playTestAlarmSound() },
+                        onSetDailyVocabGoal = { goal -> viewModel.setDailyVocabGoal(goal) },
+                        onImportVocabDocument = { uri, name -> viewModel.importVocabDocument(uri, name) },
+                        onImportVocabText = { text, name -> viewModel.importVocabText(text, name) },
+                        onLoadSampleCefrVocab = { viewModel.loadSampleCefrVocabulary() },
+                        onMarkVocabMastered = { id -> viewModel.markVocabMastered(id) },
+                        onResetVocabForReview = { id -> viewModel.resetVocabForReview(id) }
                     )
 
                     if (showPermissionsDialog) {
@@ -143,6 +286,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.checkPermissions()
+        viewModel.refreshFirestoreState()
     }
 
     private fun requestForegroundLocation() {

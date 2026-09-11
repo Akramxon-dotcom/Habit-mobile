@@ -1,6 +1,6 @@
 {
   "name": "Habit",
-  "description": "Shaxsiy kun tartibi hamrohi — GPS kelishni aniqlash, to'liq ekranli alarm va chalg'ituvchi ilovalarni bloklash xizmati",
+  "description": "Pro-darajadagi Liquid Glass uslubidagi shaxsiy kun tartibi, 5 xil moslashuvchan dizayn temasi, GPS kelishni aniqlash va intizom nazorati",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
