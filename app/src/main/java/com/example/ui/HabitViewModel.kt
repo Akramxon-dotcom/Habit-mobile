@@ -144,6 +144,8 @@ data class HabitUiState(
 
     // Alarm Sound & Volume
     val isAlarmMuted: Boolean = false,
+    val isAtSchool: Boolean = false,
+    val isSchoolMuted: Boolean = false,
     val alarmVolume: Float = 0.85f,
     val alarmSoundTone: String = "STANDARD",
 
@@ -284,7 +286,10 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
                 timeBankMinutes = prefs.getTimeBankMinutes(),
                 isLate = isLate,
                 nextPrayer = nextPr,
-                hijriDate = hijri
+                hijriDate = hijri,
+                isAlarmMuted = prefs.isAlarmMuted,
+                isAtSchool = prefs.isAtSchool,
+                isSchoolMuted = prefs.isSchoolMuted
             )
         }
     }
@@ -352,6 +357,8 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
                 isBlockerPaused = prefs.isBlockerPaused,
                 userGeminiApiKey = prefs.userGeminiApiKey,
                 isAlarmMuted = prefs.isAlarmMuted,
+                isAtSchool = prefs.isAtSchool,
+                isSchoolMuted = prefs.isSchoolMuted,
                 alarmVolume = prefs.alarmVolume,
                 alarmSoundTone = prefs.alarmSoundTone,
                 dailyVocabGoal = prefs.dailyVocabGoal,
@@ -1035,9 +1042,14 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
     fun playTestAlarmSound() {
         val tone = _uiState.value.alarmSoundTone
         val volume = _uiState.value.alarmVolume
-        val isMuted = _uiState.value.isAlarmMuted
+        val isMuted = prefs.shouldMuteAlarm()
         if (isMuted) {
-            viewModelScope.launch { _userMessage.emit("⚠️ Signal ovozsiz (Muted) holatda! Avval yuqoridagi karnay tugmasini bosing.") }
+            val reason = if (prefs.isAtSchool || prefs.isSchoolMuted) {
+                "🏫 Maktab hududidasiz! Darsga xalaqit bermasligi uchun barcha tovushlar avtomatik o'chirilgan (telefon tebranishda)."
+            } else {
+                "⚠️ Signal ovozsiz (Muted) holatda! Avval yuqoridagi karnay tugmasini bosing yoki sozlamalardan yoqing."
+            }
+            viewModelScope.launch { _userMessage.emit(reason) }
             return
         }
 

@@ -3,6 +3,7 @@ package com.example.ui.alarm
 import android.app.KeyguardManager
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.net.Uri
@@ -138,6 +139,8 @@ class AlarmActivity : ComponentActivity() {
                     category = category,
                     endTime = endTime,
                     note = note,
+                    isMuted = prefs.shouldMuteAlarm(),
+                    isAtSchool = prefs.isAtSchool || prefs.isSchoolMuted,
                     onDone = {
                         handleAnswerDone(taskId, taskTitle, endTime)
                     },
@@ -173,29 +176,44 @@ class AlarmActivity : ComponentActivity() {
     }
 
     private fun startAlarmAudioAndVibration() {
-        try {
-            var alertUri: Uri? = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-            if (alertUri == null) {
-                alertUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-            }
-            if (alertUri == null) {
-                alertUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            }
+        val shouldMute = prefs.shouldMuteAlarm()
+        if (shouldMute) {
+            Log.d(TAG, "AlarmActivity: Signal ovozsiz holatda (shouldMuteAlarm=true, isAlarmMuted=${prefs.isAlarmMuted}, isAtSchool=${prefs.isAtSchool})")
+        } else {
+            // Only start our own MediaPlayer if AlarmRingtoneService is not already playing audio
+            if (!AlarmRingtoneService.isServiceRunning()) {
+                try {
+                    val alertUri: Uri = when (prefs.alarmSoundTone) {
+                        "NOTIFICATION" -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                        "RINGTONE" -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                        else -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                    }
 
-            mediaPlayer = MediaPlayer().apply {
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ALARM)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build()
-                )
-                alertUri?.let { setDataSource(applicationContext, it) }
-                isLooping = true
-                prepare()
-                start()
+                    val vol = prefs.alarmVolume.coerceIn(0.05f, 1f)
+
+                    mediaPlayer = MediaPlayer().apply {
+                        setAudioAttributes(
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_ALARM)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                .setLegacyStreamType(AudioManager.STREAM_ALARM)
+                                .build()
+                        )
+                        setDataSource(applicationContext, alertUri)
+                        setVolume(vol, vol)
+                        isLooping = true
+                        prepare()
+                        start()
+                    }
+                    Log.d(TAG, "AlarmActivity: Audio chalish boshlandi (vol=$vol)")
+                } catch (e: Exception) {
+                    Log.e(TAG, "MediaPlayer xatolik: ${e.message}", e)
+                }
+            } else {
+                Log.d(TAG, "AlarmActivity: AlarmRingtoneService allaqachon audio chalmoqda")
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "MediaPlayer xatolik: ${e.message}", e)
         }
 
         try {
@@ -337,6 +355,8 @@ fun AlarmScreen(
     category: String,
     endTime: String,
     note: String,
+    isMuted: Boolean = false,
+    isAtSchool: Boolean = false,
     onDone: () -> Unit,
     onStopRingtone: () -> Unit,
     onSnooze: (Int) -> Unit,
@@ -423,6 +443,29 @@ fun AlarmScreen(
                                 color = Color.White.copy(alpha = 0.7f),
                                 modifier = Modifier.padding(top = 4.dp)
                             )
+                        }
+
+                        if (isMuted) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFFEF5350).copy(alpha = 0.18f),
+                                border = BorderStroke(1.dp, Color(0xFFEF5350).copy(alpha = 0.45f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(if (isAtSchool) "🏫" else "🔕", fontSize = 13.sp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = if (isAtSchool) "Maktab hududida: ovoz o'chirilgan (tebranishda)" else "Ovozsiz rejim: faqat tebranish",
+                                        color = Color(0xFFFFCDD2),
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
                         }
                     }
 

@@ -40,6 +40,9 @@ class AlarmRingtoneService : Service() {
         const val EXTRA_NOTE = "extra_note"
         const val EXTRA_TASK_ID = "extra_task_id"
 
+        private var _isRingingActive: Boolean = false
+        fun isServiceRunning(): Boolean = _isRingingActive
+
         fun startAlarm(
             context: Context,
             title: String,
@@ -103,6 +106,7 @@ class AlarmRingtoneService : Service() {
                 val taskId = intent?.getStringExtra(EXTRA_TASK_ID) ?: ""
 
                 acquireWakeLock()
+                _isRingingActive = true
                 startForegroundRinging(title, category, end, note, taskId)
                 startAudioAndVibration()
                 launchAlarmActivity(title, category, end, note, taskId)
@@ -198,9 +202,9 @@ class AlarmRingtoneService : Service() {
     private fun startAudioAndVibration() {
         val prefs = com.example.data.local.HabitPreferences(applicationContext)
 
-        // Start Audio (if not muted)
-        if (prefs.isAlarmMuted) {
-            Log.d(TAG, "Eslatma signali ovozsiz qilingan (Muted)")
+        // Start Audio (if not muted by user, school geofence, or silent mode)
+        if (prefs.shouldMuteAlarm()) {
+            Log.d(TAG, "Eslatma signali ovozsiz qilingan (shouldMuteAlarm=true, isAlarmMuted=${prefs.isAlarmMuted}, isAtSchool=${prefs.isAtSchool})")
         } else {
             try {
                 val alarmUri: Uri = when (prefs.alarmSoundTone) {
@@ -280,6 +284,7 @@ class AlarmRingtoneService : Service() {
     }
 
     private fun stopForegroundAndSelf() {
+        _isRingingActive = false
         try {
             mediaPlayer?.stop()
             mediaPlayer?.release()

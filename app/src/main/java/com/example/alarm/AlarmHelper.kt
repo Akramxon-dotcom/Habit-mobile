@@ -29,14 +29,6 @@ object AlarmHelper {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-            val alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-
-            val audioAttributes = AudioAttributes.Builder()
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .setUsage(AudioAttributes.USAGE_ALARM)
-                .build()
-
             val alarmChannel = NotificationChannel(
                 CHANNEL_ID_ALARM,
                 context.getString(R.string.notification_channel_alarm),
@@ -46,7 +38,7 @@ object AlarmHelper {
                 enableLights(true)
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 800, 400, 800)
-                setSound(alarmSound, audioAttributes)
+                setSound(null, null)
                 setBypassDnd(true)
                 lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
             }

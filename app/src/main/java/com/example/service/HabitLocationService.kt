@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.location.Location
+import android.media.AudioManager
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
@@ -18,6 +19,7 @@ import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
 import com.example.alarm.AlarmHelper
+import com.example.alarm.AlarmRingtoneService
 import com.example.data.local.HabitPreferences
 import com.example.data.remote.FirestoreClient
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -212,10 +214,13 @@ class HabitLocationService : Service() {
 
         _lastDetectedLocation.value = String.format(Locale.US, "%.5f, %.5f", currentLat, currentLng)
 
+        // 1. Automatic School Muting & Phone Vibrate Mode Management
+        checkSchoolGeofence(currentLat, currentLng)
+
         val radius = prefs.radiusMeters
         val distanceResults = FloatArray(1)
 
-        // Check all custom locations configured by user
+        // 2. Check all custom locations configured by user
         val customLocations = prefs.getCustomLocations().filter { it.isEnabled }
         for (loc in customLocations) {
             Location.distanceBetween(currentLat, currentLng, loc.lat, loc.lng, distanceResults)
@@ -245,6 +250,82 @@ class HabitLocationService : Service() {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Detects entering or exiting the School (Maktab) perimeter:
+     * - When entering: Automatically silences all alarm sounds, turns on phone vibrate mode, and terminates active alarms.
+     * - When exiting: Automatically re-enables sound and restores previous phone ringer mode.
+     */
+    private fun checkSchoolGeofence(currentLat: Double, currentLng: Double) {
+        val distanceResults = FloatArray(1)
+        val schoolLoc = prefs.getCustomLocations().firstOrNull {
+            it.isEnabled && (it.id == "maktab" || it.name.contains("maktab", ignoreCase = true) || it.actionType == "SCHOOL_MUTE")
+        }
+        val targetLat = schoolLoc?.lat ?: prefs.maktabLat
+        val targetLng = schoolLoc?.lng ?: prefs.maktabLng
+        val effectiveRadius = (schoolLoc?.radiusMeters ?: prefs.radiusMeters).coerceAtLeast(60f)
+
+        Location.distanceBetween(currentLat, currentLng, targetLat, targetLng, distanceResults)
+        val distanceToSchool = distanceResults[0]
+        val isInsideSchool = distanceToSchool <= effectiveRadius
+
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+
+        if (isInsideSchool) {
+            if (!prefs.isAtSchool) {
+                // User entered School grounds
+                Log.d(TAG, "🏫 Maktab hududiga kirildi (masofa: ${distanceToSchool.toInt()}m). Ovozlar o'chirildi va tebranish yoqildi.")
+                prefs.isAtSchool = true
+                prefs.isSchoolMuted = true
+                prefs.wasMutedBeforeSchool = prefs.isAlarmMuted
+                prefs.isAlarmMuted = true
+
+                // Immediately stop any ringing alarms
+                AlarmRingtoneService.stopAlarm(applicationContext)
+
+                // Try to set system phone ringer to VIBRATE mode
+                try {
+                    if (audioManager != null) {
+                        val currentMode = audioManager.ringerMode
+                        if (currentMode != AudioManager.RINGER_MODE_VIBRATE) {
+                            prefs.previousRingerMode = currentMode
+                            audioManager.ringerMode = AudioManager.RINGER_MODE_VIBRATE
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Telefonni vibrate rejimiga o'tkazishda cheklov: ${e.message}")
+                }
+
+                updateNotificationText("🏫 Maktabdasiz: Ovozlar o'chirildi, tebranish rejimi faol (${distanceToSchool.toInt()}m)")
+            }
+        } else {
+            if (prefs.isAtSchool) {
+                // User exited School grounds
+                Log.d(TAG, "🏫 Maktab hududidan chiqildi (masofa: ${distanceToSchool.toInt()}m). Asl sozlamalar tiklanmoqda.")
+                prefs.isAtSchool = false
+                prefs.isSchoolMuted = false
+
+                // Restore previous mute setting
+                prefs.isAlarmMuted = prefs.wasMutedBeforeSchool
+
+                // Restore phone ringer mode
+                try {
+                    if (audioManager != null) {
+                        val prevMode = prefs.previousRingerMode
+                        if (prevMode != -1) {
+                            audioManager.ringerMode = prevMode
+                        } else {
+                            audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Telefon ringer rejimini tiklashda cheklov: ${e.message}")
+                }
+
+                updateNotificationText("🏫 Maktabdan chiqildi: Ovozlar va rejimlar avtomatik tiklandi")
             }
         }
     }

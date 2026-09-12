@@ -619,6 +619,46 @@ class HabitPreferences(context: Context) {
         get() = prefs.getBoolean("key_alarm_muted", false)
         set(value) = prefs.edit().putBoolean("key_alarm_muted", value).apply()
 
+    var isSchoolMuted: Boolean
+        get() = prefs.getBoolean("key_is_school_muted", false)
+        set(value) = prefs.edit().putBoolean("key_is_school_muted", value).apply()
+
+    var isAtSchool: Boolean
+        get() = prefs.getBoolean("key_is_at_school", false)
+        set(value) = prefs.edit().putBoolean("key_is_at_school", value).apply()
+
+    var wasMutedBeforeSchool: Boolean
+        get() = prefs.getBoolean("key_was_muted_before_school", false)
+        set(value) = prefs.edit().putBoolean("key_was_muted_before_school", value).apply()
+
+    var previousRingerMode: Int
+        get() = prefs.getInt("key_previous_ringer_mode", -1)
+        set(value) = prefs.edit().putInt("key_previous_ringer_mode", value).apply()
+
+    /**
+     * Absolute check whether any alarm, ringtone, or test sound must be completely muted:
+     * - Returns true if the user explicitly muted sounds in the top bar or settings (isAlarmMuted)
+     * - OR if the user is currently at school (isSchoolMuted or isAtSchool)
+     */
+    fun shouldMuteAlarm(): Boolean {
+        return isAlarmMuted || isSchoolMuted || isAtSchool
+    }
+
+    /**
+     * Checks whether given coordinates fall inside the designated school (Maktab) zone.
+     */
+    fun checkIsAtSchool(lat: Double, lng: Double): Boolean {
+        val results = FloatArray(1)
+        val schoolLoc = getCustomLocations().firstOrNull {
+            it.isEnabled && (it.id == "maktab" || it.name.contains("maktab", ignoreCase = true) || it.actionType == "SCHOOL_MUTE")
+        }
+        val targetLat = schoolLoc?.lat ?: maktabLat
+        val targetLng = schoolLoc?.lng ?: maktabLng
+        val effectiveRadius = (schoolLoc?.radiusMeters ?: radiusMeters).coerceAtLeast(60f)
+        android.location.Location.distanceBetween(lat, lng, targetLat, targetLng, results)
+        return results[0] <= effectiveRadius
+    }
+
     var alarmVolume: Float
         get() = prefs.getFloat("key_alarm_volume", 0.85f)
         set(value) = prefs.edit().putFloat("key_alarm_volume", value.coerceIn(0f, 1f)).apply()
