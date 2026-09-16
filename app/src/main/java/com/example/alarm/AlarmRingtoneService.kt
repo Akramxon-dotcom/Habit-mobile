@@ -108,7 +108,6 @@ class AlarmRingtoneService : Service() {
                 acquireWakeLock()
                 _isRingingActive = true
                 startForegroundRinging(title, category, end, note, taskId)
-                startAudioAndVibration()
                 launchAlarmActivity(title, category, end, note, taskId)
                 return START_NOT_STICKY
             }
@@ -175,6 +174,16 @@ class AlarmRingtoneService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val stopIntent = Intent(this, AlarmRingtoneService::class.java).apply {
+            action = ACTION_STOP_RINGING
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this,
+            NOTIFICATION_ID_RINGING + 1,
+            stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID_ALARM_RINGING)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle("⏰ Vazifa vaqti yetib keldi: $title")
@@ -184,6 +193,8 @@ class AlarmRingtoneService : Service() {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setFullScreenIntent(fullScreenPendingIntent, true)
             .setContentIntent(fullScreenPendingIntent)
+            .addAction(R.drawable.ic_launcher_foreground, "🔕 O'chirish", stopPendingIntent)
+            .addAction(R.drawable.ic_launcher_foreground, "👁 Ko'rish", fullScreenPendingIntent)
             .setOngoing(true)
             .setAutoCancel(false)
             .build()

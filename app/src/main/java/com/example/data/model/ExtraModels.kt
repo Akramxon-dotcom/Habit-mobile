@@ -10,11 +10,14 @@ data class VocabCard(
     val partOfSpeech: String = "noun",
     val definition: String = "",
     val example: String = "",
+    val exampleTranslation: String = "",
+    val synonym: String = "",
     val mnemonic: String = "",
     val boxLevel: Int = 1, // 1: Yangi, 2: O'rganilmoqda, 3: Mustahkamlandi, 4: Yodlandi
     val level: String = "A1", // A1, A2, B1, B2, C1, C2
     val sourceDocName: String = "",
     val isMastered: Boolean = false,
+    val learnedDate: String = "",
     val reviewCount: Int = 0,
     val lastReviewedEpochMs: Long = System.currentTimeMillis()
 )
@@ -31,6 +34,7 @@ data class JournalEntry(
 )
 
 data class QuizQuestion(
+    val cardId: String = "",
     val question: String,
     val options: List<String>,
     val correctIndex: Int,

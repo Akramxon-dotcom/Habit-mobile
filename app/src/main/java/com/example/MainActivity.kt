@@ -184,8 +184,11 @@ class MainActivity : ComponentActivity() {
                         onUpdateVocabBoxLevel = { id, level ->
                             viewModel.updateVocabBoxLevel(id, level)
                         },
-                        onGenerateQuiz = {
-                            viewModel.generateQuiz()
+                        onGenerateQuiz = { retryOnly ->
+                            viewModel.generateQuiz(retryOnly = retryOnly)
+                        },
+                        onSubmitQuizResults = { correctCardIds, failedCardIds ->
+                            viewModel.submitQuizResults(correctCardIds, failedCardIds)
                         },
                         onCloseQuiz = {
                             viewModel.closeQuiz()
@@ -259,11 +262,16 @@ class MainActivity : ComponentActivity() {
                         onSetAlarmSoundTone = { tone -> viewModel.setAlarmSoundTone(tone) },
                         onPlayTestAlarmSound = { viewModel.playTestAlarmSound() },
                         onSetDailyVocabGoal = { goal -> viewModel.setDailyVocabGoal(goal) },
+                        onAddMoreDailyWords = { viewModel.addMoreDailyWords() },
                         onImportVocabDocument = { uri, name -> viewModel.importVocabDocument(uri, name) },
                         onImportVocabText = { text, name -> viewModel.importVocabText(text, name) },
                         onLoadSampleCefrVocab = { viewModel.loadSampleCefrVocabulary() },
                         onMarkVocabMastered = { id -> viewModel.markVocabMastered(id) },
-                        onResetVocabForReview = { id -> viewModel.resetVocabForReview(id) }
+                        onResetVocabForReview = { id -> viewModel.resetVocabForReview(id) },
+                        onTestTelegramConnection = { token, chatId -> viewModel.testTelegramConnection(token, chatId) },
+                        onSelectEnglishPlanWeek = { week -> viewModel.setActiveEnglishPlanWeek(week) },
+                        onToggleEnglishPlanTask = { taskId -> viewModel.toggleEnglishPlanTask(taskId) },
+                        onSetEnglishPlanModalOpen = { isOpen -> viewModel.setEnglishPlanModalOpen(isOpen) }
                     )
 
                     if (showPermissionsDialog) {

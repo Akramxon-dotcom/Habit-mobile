@@ -276,8 +276,8 @@ object TaskTimeEngine {
             Calendar.MARCH -> "mart"
             Calendar.APRIL -> "aprel"
             Calendar.MAY -> "may"
-            Calendar.JUNE -> "iyul"
-            Calendar.JULY -> "iyun"
+            Calendar.JUNE -> "iyun"
+            Calendar.JULY -> "iyul"
             Calendar.AUGUST -> "avgust"
             Calendar.SEPTEMBER -> "sentabr"
             Calendar.OCTOBER -> "oktabr"
@@ -286,6 +286,48 @@ object TaskTimeEngine {
             else -> ""
         }
         return "$dayOfWeek, $dayOfMonth-$monthName"
+    }
+
+    fun getIsoDateForOffset(offsetDays: Int): String {
+        val cal = Calendar.getInstance()
+        cal.add(Calendar.DAY_OF_YEAR, offsetDays)
+        return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(cal.time)
+    }
+
+    fun getDisplayDateForOffset(offsetDays: Int): String {
+        val cal = Calendar.getInstance()
+        cal.add(Calendar.DAY_OF_YEAR, offsetDays)
+        val dayOfWeek = when (cal.get(Calendar.DAY_OF_WEEK)) {
+            Calendar.MONDAY -> "Dushanba"
+            Calendar.TUESDAY -> "Seshanba"
+            Calendar.WEDNESDAY -> "Chorshanba"
+            Calendar.THURSDAY -> "Payshanba"
+            Calendar.FRIDAY -> "Juma"
+            Calendar.SATURDAY -> "Shanba"
+            Calendar.SUNDAY -> "Yakshanba"
+            else -> ""
+        }
+        val dayOfMonth = cal.get(Calendar.DAY_OF_MONTH)
+        val monthName = when (cal.get(Calendar.MONTH)) {
+            Calendar.JANUARY -> "yanvar"
+            Calendar.FEBRUARY -> "fevral"
+            Calendar.MARCH -> "mart"
+            Calendar.APRIL -> "aprel"
+            Calendar.MAY -> "may"
+            Calendar.JUNE -> "iyun"
+            Calendar.JULY -> "iyul"
+            Calendar.AUGUST -> "avgust"
+            Calendar.SEPTEMBER -> "sentabr"
+            Calendar.OCTOBER -> "oktabr"
+            Calendar.NOVEMBER -> "noyabr"
+            Calendar.DECEMBER -> "dekabr"
+            else -> ""
+        }
+        return when (offsetDays) {
+            0 -> "Bugun ($dayOfWeek, $dayOfMonth-$monthName)"
+            -1 -> "Kecha ($dayOfWeek, $dayOfMonth-$monthName)"
+            else -> "$dayOfWeek, $dayOfMonth-$monthName"
+        }
     }
 
     fun getGreeting(segment: String): String {
@@ -309,98 +351,136 @@ object TaskTimeEngine {
         return (nowMin - dayStart).toFloat() / (dayEnd - dayStart).toFloat()
     }
 
-    // Default schedules matching the user's website exact plans
+    // Default schedules matching the user's exact schedule
     val LESSON_PLAN = listOf(
-        ScheduleItem(title = "Uyg'onish → Tahorat → Bomdod namozi → dua", category = "prayer", start = "04:05", end = "04:40", note = "Kun boshidagi eng muhim ustuvorlik", blocking = true),
-        ScheduleItem(title = "Ingliz — yangi 15-20 so'z yodlash", category = "english", start = "04:40", end = "05:10", note = "Yangi so'zlar", blocking = true),
-        ScheduleItem(title = "Ingliz — avvalgi so'zlarni takrorlash", category = "english", start = "05:10", end = "05:30", note = "Unutmaslik uchun shart", blocking = true),
-        ScheduleItem(title = "Sport + ingliz audio tinglash", category = "sport", start = "05:30", end = "06:05", note = "Jismoniy chiniqish", blocking = false),
-        ScheduleItem(title = "Dush, tayyorgarlik", category = "other", start = "06:05", end = "06:35", note = "Kiyinish va tayyorgarlik", blocking = false),
-        ScheduleItem(title = "Nonushta", category = "food", start = "06:35", end = "07:00", note = "Quvvat to'plash", blocking = false),
-        ScheduleItem(title = "Ingliz — Grammatika mashqi", category = "english", start = "07:00", end = "07:40", note = "Grammatika qoidalari", blocking = true),
-        ScheduleItem(title = "Maktabga yo'l (+ audio tinglash)", category = "other", start = "07:40", end = "08:00", note = "Yo'lda foydali audio", blocking = false),
-        ScheduleItem(title = "Maktab", category = "school", start = "08:00", end = "13:00", note = "Darslar jarayoni", blocking = true),
-        ScheduleItem(title = "Yo'l → Tahorat → Peshin namozi → dua", category = "prayer", start = "13:00", end = "13:35", note = "Tanaffusda imkon bo'lsa maktabda o'qi", blocking = true),
+        ScheduleItem(title = "Uyg'onish, tahorat", category = "prayer", start = "04:00", end = "04:15", note = "Tetik uyg'onish va tahorat", blocking = false),
+        ScheduleItem(title = "Qisqa osoyishtalik (bo'sh)", category = "other", start = "04:15", end = "04:20", note = "Bomdod namozi oldidan osoyishtalik", blocking = false),
+        ScheduleItem(title = "Bomdod namozi + dua", category = "prayer", start = "04:20", end = "04:45", note = "Kun boshidagi eng muhim ustuvorlik", blocking = true),
+        ScheduleItem(title = "4000 Essential Words", category = "english", start = "04:45", end = "05:15", note = "Navbatdagi 8 ta so'zni yodla (yoz + ovozli talaffuz qil) + kecha yodlagan 8 ta so'zni qayta ko'zdan kechir", blocking = true),
+        ScheduleItem(title = "Sport + BBC 6 Minute English", category = "sport", start = "05:15", end = "05:50", note = "Sport (o'zing bilgan mashqlar) + shu payt BBC 6 Minute Englishning navbatdagi epizodini tingla", blocking = false),
+        ScheduleItem(title = "Tanaffus (bo'sh)", category = "other", start = "05:50", end = "05:55", note = "Nafas rostlash", blocking = false),
+        ScheduleItem(title = "Dush, tayyorgarlik", category = "other", start = "05:55", end = "06:25", note = "Dush va tayyorgarlik", blocking = false),
+        ScheduleItem(title = "Nonushta", category = "food", start = "06:25", end = "06:55", note = "Quvvat to'plash", blocking = false),
+        ScheduleItem(title = "Essential Grammar in Use", category = "english", start = "06:55", end = "07:35", note = "Navbatdagi 1 ta Unit: qoida sahifasini o'qi, mashq sahifasini yoz", blocking = true),
+        ScheduleItem(title = "Zaxira vaqt", category = "other", start = "07:35", end = "07:45", note = "Maktabga chiqish oldidan zaxira", blocking = false),
+        ScheduleItem(title = "Maktabga yo'l", category = "other", start = "07:45", end = "08:00", note = "BBC podkastni tinglashda davom et", blocking = false),
+        ScheduleItem(title = "Maktab", category = "school", start = "08:00", end = "13:00", note = "Maktab darslari jarayoni", blocking = true),
+        ScheduleItem(title = "Yo'l → Tahorat → Peshin namozi → dua", category = "prayer", start = "13:00", end = "13:35", note = "Peshin ibodati va duo", blocking = true),
         ScheduleItem(title = "Tushlik", category = "food", start = "13:35", end = "13:55", note = "Tushlik vaqti", blocking = false),
-        ScheduleItem(title = "RTM — 4 guruh vazifalari / o'z ishlaring", category = "rtm", start = "13:55", end = "15:00", note = "Loyiha va kodlash", blocking = true),
-        ScheduleItem(title = "🇬🇧 Ingliz tili darsi (offline)", category = "english", start = "15:00", end = "17:00", note = "Asosiy dars mashg'uloti", blocking = true),
-        ScheduleItem(title = "Tahorat → Asr namozi → dua", category = "prayer", start = "17:00", end = "17:25", note = "Darsda tanaffus bo'lmasa, dars tugagach", blocking = true),
-        ScheduleItem(title = "Erkin tanaffus — telefon emas", category = "other", start = "17:25", end = "17:55", note = "Miyani dam oldirish", blocking = false),
-        ScheduleItem(title = "Ingliz — dars uy vazifasi (yozma + takror)", category = "english", start = "17:55", end = "18:40", note = "Yozma vazifalar", blocking = true),
-        ScheduleItem(title = "Tahorat → Shom namozi → dua", category = "prayer", start = "18:40", end = "19:08", note = "Shom ibodati", blocking = true),
-        ScheduleItem(title = "Kechki ovqat", category = "food", start = "19:08", end = "19:40", note = "Oila bilan birga", blocking = false),
-        ScheduleItem(title = "IBRAT Academy", category = "english", start = "19:40", end = "20:00", note = "Ilova orqali o'rganish", blocking = true),
-        ScheduleItem(title = "Tahorat → Xufton namozi → dua", category = "prayer", start = "20:00", end = "20:35", note = "Xufton ibodati", blocking = true),
-        ScheduleItem(title = "Ingliz — Reading (kitob)", category = "english", start = "20:35", end = "21:05", note = "Inglizcha mutolaa", blocking = true),
-        ScheduleItem(title = "📖 O'zbek tilida kitob o'qish", category = "other", start = "21:05", end = "21:30", note = "Foydali kitob", blocking = false),
-        ScheduleItem(title = "Yotishga tayyorgarlik — telefon boshqa xonaga", category = "night", start = "21:30", end = "22:00", note = "Telefonni boshqa xonaga qo'yish", blocking = false),
-        ScheduleItem(title = "Uxlash", category = "night", start = "22:00", end = "04:05", note = "Tetik uyqu", blocking = false)
+        ScheduleItem(title = "RTM — 4 guruh vazifalari", category = "rtm", start = "13:55", end = "15:00", note = "Bugungi 4 guruhdan kelgan aniq vazifalarni bajar (ustoz aytgan tartibda)", blocking = true),
+        ScheduleItem(title = "🇬🇧 Ingliz tili darsi", category = "english", start = "15:00", end = "17:00", note = "O'qituvchi bilan, mavzu darsda beriladi", blocking = true),
+        ScheduleItem(title = "Tahorat → Asr namozi → dua", category = "prayer", start = "17:00", end = "17:25", note = "Asr ibodati va duo", blocking = true),
+        ScheduleItem(title = "Erkin tanaffus", category = "other", start = "17:25", end = "17:55", note = "Miyani dam oldirish (telefon emas)", blocking = false),
+        ScheduleItem(title = "Bugungi dars uy vazifasi", category = "english", start = "17:55", end = "18:40", note = "Bugungi dars uy vazifasini yoz, so'ng ovoz chiqarib 3 marta o'qib chiq", blocking = true),
+        ScheduleItem(title = "Tahorat → Shom namozi → dua", category = "prayer", start = "18:40", end = "19:08", note = "Shom ibodati va duo", blocking = true),
+        ScheduleItem(title = "Kechki ovqat", category = "food", start = "19:08", end = "19:40", note = "Oila bilan birga kechki ovqat", blocking = false),
+        ScheduleItem(title = "IBRAT Academy", category = "english", start = "19:40", end = "20:00", note = "Navbatdagi video darsni ko'r, testini ishla", blocking = true),
+        ScheduleItem(title = "Tahorat → Xufton namozi → dua", category = "prayer", start = "20:00", end = "20:35", note = "Xufton ibodati va duo", blocking = true),
+        ScheduleItem(title = "Oxford Bookworms Starter", category = "english", start = "20:35", end = "21:05", note = "Navbatdagi 1 bob: o'qi, tushunmagan so'zlarni lug'atga (ilovaga) yoz", blocking = true),
+        ScheduleItem(title = "📖 O'zbek tilida kitob o'qish", category = "other", start = "21:05", end = "21:30", note = "O'zbek tilidagi kitobingdan 15-20 bet o'qi", blocking = false),
+        ScheduleItem(title = "Yotishga tayyorgarlik", category = "night", start = "21:30", end = "22:00", note = "Telefonni boshqa xonaga qo'yish, uyquga hozirlik", blocking = false),
+        ScheduleItem(title = "Uxlash", category = "night", start = "22:00", end = "04:00", note = "Tetik uyqu (22:00 — 04:00)", blocking = false)
     )
 
     val FREE_PLAN = listOf(
-        ScheduleItem(title = "Uyg'onish → Tahorat → Bomdod namozi → dua", category = "prayer", start = "04:05", end = "04:40", note = "Kun boshidagi ibodat", blocking = true),
-        ScheduleItem(title = "Ingliz — yangi so'z yodlash", category = "english", start = "04:40", end = "05:10", note = "Yangi so'zlar", blocking = true),
-        ScheduleItem(title = "Ingliz — so'zlarni takrorlash", category = "english", start = "05:10", end = "05:30", note = "Avvalgi so'zlar", blocking = true),
-        ScheduleItem(title = "Sport + audio", category = "sport", start = "05:30", end = "06:05", note = "Jismoniy tarbiya", blocking = false),
-        ScheduleItem(title = "Dush", category = "other", start = "06:05", end = "06:35", note = "Tetiklanish", blocking = false),
-        ScheduleItem(title = "Nonushta", category = "food", start = "06:35", end = "07:00", note = "Nonushta", blocking = false),
-        ScheduleItem(title = "Ingliz — Grammatika mashqi", category = "english", start = "07:00", end = "07:40", note = "Grammatika", blocking = true),
-        ScheduleItem(title = "Maktabga yo'l (+ audio)", category = "other", start = "07:40", end = "08:00", note = "Yo'lda tinglash", blocking = false),
-        ScheduleItem(title = "Maktab", category = "school", start = "08:00", end = "13:00", note = "Darslar", blocking = true),
-        ScheduleItem(title = "Yo'l → Tahorat → Peshin namozi → dua", category = "prayer", start = "13:00", end = "13:35", note = "Peshin ibodati", blocking = true),
-        ScheduleItem(title = "Tushlik", category = "food", start = "13:35", end = "13:55", note = "Tushlik", blocking = false),
-        ScheduleItem(title = "RTM — 4 guruhning ortda qolgan vazifalari", category = "rtm", start = "13:55", end = "15:30", note = "Amaliy dasturlash", blocking = true),
-        ScheduleItem(title = "Ingliz — Speaking (IBRAT / Cake shadowing)", category = "english", start = "15:30", end = "16:15", note = "Nutqni o'stirish", blocking = true),
-        ScheduleItem(title = "Ingliz — Listening (podkast)", category = "english", start = "16:15", end = "16:45", note = "Eshitib tushunish", blocking = true),
-        ScheduleItem(title = "Tahorat → Asr namozi → dua", category = "prayer", start = "16:45", end = "17:13", note = "Asr ibodati", blocking = true),
-        ScheduleItem(title = "Erkin tanaffus", category = "other", start = "17:13", end = "17:43", note = "Dam olish", blocking = false),
-        ScheduleItem(title = "🎬 Ingliz — film/serial", category = "english", start = "17:43", end = "18:40", note = "Film orqali o'rganish", blocking = true),
-        ScheduleItem(title = "Tahorat → Shom namozi → dua", category = "prayer", start = "18:40", end = "19:08", note = "Shom ibodati", blocking = true),
-        ScheduleItem(title = "Kechki ovqat", category = "food", start = "19:08", end = "19:40", note = "Ovqatlanish", blocking = false),
-        ScheduleItem(title = "IBRAT Academy", category = "english", start = "19:40", end = "20:00", note = "Mashqlar", blocking = true),
-        ScheduleItem(title = "Tahorat → Xufton namozi → dua", category = "prayer", start = "20:00", end = "20:35", note = "Xufton ibodati", blocking = true),
-        ScheduleItem(title = "Ingliz — Writing mashqi", category = "english", start = "20:35", end = "21:05", note = "Insho va yozish", blocking = true),
+        ScheduleItem(title = "Uyg'onish, tahorat", category = "prayer", start = "04:00", end = "04:15", note = "Tetik uyg'onish va tahorat", blocking = false),
+        ScheduleItem(title = "Qisqa osoyishtalik (bo'sh)", category = "other", start = "04:15", end = "04:20", note = "Bomdod namozi oldidan osoyishtalik", blocking = false),
+        ScheduleItem(title = "Bomdod namozi + dua", category = "prayer", start = "04:20", end = "04:45", note = "Kun boshidagi eng muhim ustuvorlik", blocking = true),
+        ScheduleItem(title = "4000 Essential Words", category = "english", start = "04:45", end = "05:15", note = "Navbatdagi 8 ta so'zni yodla (yoz + ovozli talaffuz qil) + kecha yodlagan 8 ta so'zni qayta ko'zdan kechir", blocking = true),
+        ScheduleItem(title = "Sport + BBC podkast", category = "sport", start = "05:15", end = "05:50", note = "Sport mashqlari + BBC podkast tinglash", blocking = false),
+        ScheduleItem(title = "Tanaffus (bo'sh)", category = "other", start = "05:50", end = "05:55", note = "Nafas rostlash", blocking = false),
+        ScheduleItem(title = "Dush, tayyorgarlik", category = "other", start = "05:55", end = "06:25", note = "Dush va tayyorgarlik", blocking = false),
+        ScheduleItem(title = "Nonushta", category = "food", start = "06:25", end = "06:55", note = "Quvvat to'plash", blocking = false),
+        ScheduleItem(title = "Essential Grammar (Takrorlash)", category = "english", start = "06:55", end = "07:35", note = "Bu haftagi 3 ta Unit'ni tezkor takrorla (yangisini o'rganmaysan, mustahkamlaysan)", blocking = true),
+        ScheduleItem(title = "Zaxira vaqt", category = "other", start = "07:35", end = "07:45", note = "Tayyorgarlik", blocking = false),
+        ScheduleItem(title = "Maktabga yo'l", category = "other", start = "07:45", end = "08:00", note = "Maktabga yo'l", blocking = false),
+        ScheduleItem(title = "Maktab", category = "school", start = "08:00", end = "13:00", note = "Maktab darslari jarayoni", blocking = true),
+        ScheduleItem(title = "Yo'l → Tahorat → Peshin namozi → dua", category = "prayer", start = "13:00", end = "13:35", note = "Peshin ibodati va duo", blocking = true),
+        ScheduleItem(title = "Tushlik", category = "food", start = "13:35", end = "13:55", note = "Tushlik vaqti", blocking = false),
+        ScheduleItem(title = "RTM — 4 guruh vazifalari", category = "rtm", start = "13:55", end = "15:30", note = "4 guruhdan ortda qolgan aniq vazifalarni tugat (ro'yxatini oldindan tuzib chiq)", blocking = true),
+        ScheduleItem(title = "Cake ilovasi", category = "english", start = "15:30", end = "16:15", note = "Bugungi 3 ta shadowing videosini ishla (videodagi gapni aynan takrorla)", blocking = true),
+        ScheduleItem(title = "Listening (BBC / VOA)", category = "english", start = "16:15", end = "16:45", note = "Seshanba: BBC 6 Minute English / Payshanba: VOA Words and Their Stories / Shanba: BBC 6 Minute English — transkript bilan tingla", blocking = true),
+        ScheduleItem(title = "Tahorat → Asr namozi → dua", category = "prayer", start = "16:45", end = "17:13", note = "Asr ibodati va duo", blocking = true),
+        ScheduleItem(title = "Erkin tanaffus", category = "other", start = "17:13", end = "17:43", note = "Dam olish (telefon emas)", blocking = false),
+        ScheduleItem(title = "🎬 Kino/serial (inglizcha)", category = "english", start = "17:43", end = "18:40", note = "Kino/serial ro'yxatidagi navbatdagi qismni ko'r, ingliz subtitr bilan (Extra English / Zootopia / Finding Nemo / Friends)", blocking = true),
+        ScheduleItem(title = "Tahorat → Shom namozi → dua", category = "prayer", start = "18:40", end = "19:08", note = "Shom ibodati va duo", blocking = true),
+        ScheduleItem(title = "Kechki ovqat", category = "food", start = "19:08", end = "19:40", note = "Oila davrasida ovqatlanish", blocking = false),
+        ScheduleItem(title = "IBRAT Academy", category = "english", start = "19:40", end = "20:00", note = "Navbatdagi dars + test", blocking = true),
+        ScheduleItem(title = "Tahorat → Xufton namozi → dua", category = "prayer", start = "20:00", end = "20:35", note = "Xufton ibodati va duo", blocking = true),
+        ScheduleItem(title = "Writing (Yozish) + Grammarly", category = "english", start = "20:35", end = "21:05", note = "Bugun nima qilganing haqida 5 ta jumla (o'tgan zamonda) yoz, keyin Grammarly'da qizil chiziqlarni tuzat", blocking = true),
         ScheduleItem(title = "📖 O'zbek tilida kitob o'qish", category = "other", start = "21:05", end = "21:30", note = "Kitob mutolaasi", blocking = false),
-        ScheduleItem(title = "Yotishga tayyorgarlik", category = "night", start = "21:30", end = "22:00", note = "Telefon boshqa xonaga", blocking = false),
-        ScheduleItem(title = "Uxlash", category = "night", start = "22:00", end = "04:05", note = "Uyqu", blocking = false)
+        ScheduleItem(title = "Yotishga tayyorgarlik", category = "night", start = "21:30", end = "22:00", note = "Telefonni boshqa xonaga qo'yish", blocking = false),
+        ScheduleItem(title = "Uxlash", category = "night", start = "22:00", end = "04:00", note = "Tetik uyqu (22:00 — 04:00)", blocking = false)
     )
+
+enum class DayType(val label: String) {
+    LESSON_DAY("DARS KUNI"),
+    NO_LESSON_DAY("DARS YO'Q KUN"),
+    SUNDAY_LIGHT_DAY("YAKSHANBA — YENGIL KUN")
+}
 
     val SUNDAY_PLAN = listOf(
-        ScheduleItem(title = "Uyg'onish → Tahorat → Bomdod namozi → dua", category = "prayer", start = "04:05", end = "04:40", note = "Bomdod ibodati", blocking = true),
-        ScheduleItem(title = "Ingliz — yangi so'z (yengil)", category = "english", start = "04:40", end = "05:10", note = "Yengil takror", blocking = true),
-        ScheduleItem(title = "So'z takrori", category = "english", start = "05:10", end = "05:30", note = "Takrorlash", blocking = true),
-        ScheduleItem(title = "Sport", category = "sport", start = "05:30", end = "06:00", note = "Yengil yugurish", blocking = false),
-        ScheduleItem(title = "Dush", category = "other", start = "06:00", end = "06:30", note = "Tetiklanish", blocking = false),
-        ScheduleItem(title = "Nonushta", category = "food", start = "06:30", end = "07:00", note = "Nonushta", blocking = false),
-        ScheduleItem(title = "IBRAT Academy", category = "english", start = "07:00", end = "08:00", note = "O'rganish", blocking = true),
-        ScheduleItem(title = "Ingliz — Reading", category = "english", start = "08:00", end = "09:00", note = "Mutolaa", blocking = true),
-        ScheduleItem(title = "Tanaffus", category = "other", start = "09:00", end = "09:15", note = "Dam olish", blocking = false),
-        ScheduleItem(title = "Ingliz — Speaking", category = "english", start = "09:15", end = "10:15", note = "Og'zaki nutq", blocking = true),
-        ScheduleItem(title = "Erkin vaqt / loyihalar", category = "other", start = "10:15", end = "12:20", note = "Shaxsiy loyihalar", blocking = false),
-        ScheduleItem(title = "Tahorat → Peshin namozi → dua", category = "prayer", start = "12:20", end = "12:52", note = "Peshin ibodati", blocking = true),
-        ScheduleItem(title = "Tushlik", category = "food", start = "12:52", end = "13:30", note = "Tushlik", blocking = false),
-        ScheduleItem(title = "Qaylula", category = "night", start = "13:30", end = "14:15", note = "Kechki quvvat uchun kunduzgi uyqu", blocking = false),
-        ScheduleItem(title = "Ingliz — Listening", category = "english", start = "14:15", end = "15:15", note = "Audio tinglash", blocking = true),
-        ScheduleItem(title = "🎬 Ingliz — Film", category = "english", start = "15:15", end = "16:15", note = "Film", blocking = true),
+        ScheduleItem(title = "Uyg'onish, tahorat, Bomdod namozi + dua", category = "prayer", start = "04:00", end = "04:45", note = "Uyg'onish, tahorat, Bomdod namozi va duo", blocking = true),
+        ScheduleItem(title = "So'z yodlash (4-5 ta, yengil) + takror", category = "english", start = "04:45", end = "05:15", note = "Yengil so'z yodlash va takrorlash", blocking = true),
+        ScheduleItem(title = "Sport", category = "sport", start = "05:15", end = "05:45", note = "Jismoniy mashqlar", blocking = false),
+        ScheduleItem(title = "Dush, nonushta", category = "food", start = "05:45", end = "06:50", note = "Dush va to'yimli nonushta", blocking = false),
+        ScheduleItem(title = "Zaxira vaqt", category = "other", start = "06:50", end = "07:00", note = "Dam olish", blocking = false),
+        ScheduleItem(title = "IBRAT Academy", category = "english", start = "07:00", end = "08:00", note = "Navbatdagi 2 ta dars + testlar", blocking = true),
+        ScheduleItem(title = "Oxford Bookworms", category = "english", start = "08:00", end = "09:00", note = "Navbatdagi 2 bob (dars kunlaridan ko'proq vaqting bor)", blocking = true),
+        ScheduleItem(title = "Tanaffus", category = "other", start = "09:00", end = "09:15", note = "Qisqa tanaffus", blocking = false),
+        ScheduleItem(title = "Cake + IBRAT suhbat mashqi", category = "english", start = "09:15", end = "10:15", note = "5 ta shadowing video + IBRAT suhbat mashqi", blocking = true),
+        ScheduleItem(title = "Erkin vaqt (Loyiha / Bot / Sayt)", category = "other", start = "10:15", end = "12:20", note = "Xohlagan loyihang (bot/sayt) ustida ishla", blocking = false),
+        ScheduleItem(title = "Tahorat → Peshin namozi → dua", category = "prayer", start = "12:20", end = "12:52", note = "Peshin ibodati va duo", blocking = true),
+        ScheduleItem(title = "Tushlik", category = "food", start = "12:52", end = "13:30", note = "Tushlik vaqti", blocking = false),
+        ScheduleItem(title = "Qaylula", category = "night", start = "13:30", end = "14:15", note = "Kunduzgi dam olish", blocking = false),
+        ScheduleItem(title = "BBC 6 Minute English", category = "english", start = "14:15", end = "15:15", note = "2 ta epizod ketma-ket", blocking = true),
+        ScheduleItem(title = "🎬 Kino/serial (inglizcha)", category = "english", start = "15:15", end = "16:15", note = "Kino ro'yxatidagi navbatdagi qism", blocking = true),
         ScheduleItem(title = "Erkin / Oila", category = "other", start = "16:15", end = "16:45", note = "Oila davrasida", blocking = false),
-        ScheduleItem(title = "Tahorat → Asr namozi → dua", category = "prayer", start = "16:45", end = "17:13", note = "Asr ibodati", blocking = true),
-        ScheduleItem(title = "Erkin tanaffus", category = "other", start = "17:13", end = "18:00", note = "Erkin vaqt", blocking = false),
-        ScheduleItem(title = "Haftalik xulosa — nima o'rgandim, keyingi hafta rejasi", category = "english", start = "18:00", end = "18:40", note = "Hafta tahlili", blocking = true),
-        ScheduleItem(title = "Tahorat → Shom namozi → dua", category = "prayer", start = "18:40", end = "19:08", note = "Shom ibodati", blocking = true),
-        ScheduleItem(title = "Kechki ovqat", category = "food", start = "19:08", end = "19:40", note = "Kechki ovqat", blocking = false),
-        ScheduleItem(title = "📖 O'zbek tilida kitob o'qish", category = "other", start = "19:40", end = "20:00", note = "Kitob mutolaasi", blocking = false),
-        ScheduleItem(title = "Tahorat → Xufton namozi → dua", category = "prayer", start = "20:00", end = "20:35", note = "Xufton ibodati", blocking = true),
-        ScheduleItem(title = "Erkin / Oila", category = "other", start = "20:35", end = "21:30", note = "Oila davrasi", blocking = false),
-        ScheduleItem(title = "Yotishga tayyorgarlik", category = "night", start = "21:30", end = "22:00", note = "Dam olish", blocking = false),
-        ScheduleItem(title = "Uxlash", category = "night", start = "22:00", end = "04:05", note = "Uyqu", blocking = false)
+        ScheduleItem(title = "Tahorat → Asr namozi → dua", category = "prayer", start = "16:45", end = "17:13", note = "Asr ibodati va duo", blocking = true),
+        ScheduleItem(title = "Erkin tanaffus", category = "other", start = "17:13", end = "18:00", note = "Dam olish", blocking = false),
+        ScheduleItem(title = "Haftalik xulosa", category = "english", start = "18:00", end = "18:40", note = "3 ta savolga yoz: (1) Nechta yangi so'z o'rgandim? (2) Grammatikadan nimani tushundim? (3) Keyingi hafta nimaga ko'proq e'tibor beraman?", blocking = true),
+        ScheduleItem(title = "Tahorat → Shom namozi → dua", category = "prayer", start = "18:40", end = "19:08", note = "Shom ibodati va duo", blocking = true),
+        ScheduleItem(title = "Kechki ovqat", category = "food", start = "19:08", end = "19:40", note = "Oila bilan birga", blocking = false),
+        ScheduleItem(title = "📖 O'zbek tilida kitob o'qish", category = "other", start = "19:40", end = "20:00", note = "Foydali kitob", blocking = false),
+        ScheduleItem(title = "Tahorat → Xufton namozi → dua", category = "prayer", start = "20:00", end = "20:35", note = "Xufton ibodati va duo", blocking = true),
+        ScheduleItem(title = "Erkin / Oila", category = "other", start = "20:35", end = "21:30", note = "Oila davrasida", blocking = false),
+        ScheduleItem(title = "Yotishga tayyorgarlik", category = "night", start = "21:30", end = "22:00", note = "Telefonni boshqa xonaga qo'yish", blocking = false),
+        ScheduleItem(title = "Uxlash", category = "night", start = "22:00", end = "04:00", note = "Tetik uyqu (22:00 — 04:00)", blocking = false)
     )
 
-    fun getTodayPlanInfo(): Pair<List<ScheduleItem>, String> {
-        val cal = Calendar.getInstance()
+    fun getDayType(cal: Calendar = Calendar.getInstance()): DayType {
         return when (cal.get(Calendar.DAY_OF_WEEK)) {
-            Calendar.SUNDAY -> Pair(SUNDAY_PLAN, "Yengil kun — Yakshanba")
-            Calendar.MONDAY, Calendar.WEDNESDAY, Calendar.FRIDAY -> Pair(LESSON_PLAN, "Dars kuni")
-            else -> Pair(FREE_PLAN, "Dars yo'q kun")
+            Calendar.SUNDAY -> DayType.SUNDAY_LIGHT_DAY // 1 - Yakshanba
+            Calendar.MONDAY -> DayType.LESSON_DAY // 2 - Dushanba (Maktab + 15:00-17:00 Ingliz)
+            Calendar.TUESDAY -> DayType.NO_LESSON_DAY // 3 - Seshanba (Maktab, lekin dars yo'q)
+            Calendar.WEDNESDAY -> DayType.LESSON_DAY // 4 - Chorshanba (Maktab + 15:00-17:00 Ingliz)
+            Calendar.THURSDAY -> DayType.NO_LESSON_DAY // 5 - Payshanba (Maktab, lekin dars yo'q)
+            Calendar.FRIDAY -> DayType.LESSON_DAY // 6 - Juma (Maktab + 15:00-17:00 Ingliz)
+            Calendar.SATURDAY -> DayType.NO_LESSON_DAY // 7 - Shanba (Maktab, lekin dars yo'q)
+            else -> DayType.NO_LESSON_DAY
         }
+    }
+
+    fun getDayTypeByCalendarDay(dayOfWeek: Int): DayType {
+        return when (dayOfWeek) {
+            Calendar.SUNDAY -> DayType.SUNDAY_LIGHT_DAY
+            Calendar.MONDAY -> DayType.LESSON_DAY
+            Calendar.TUESDAY -> DayType.NO_LESSON_DAY
+            Calendar.WEDNESDAY -> DayType.LESSON_DAY
+            Calendar.THURSDAY -> DayType.NO_LESSON_DAY
+            Calendar.FRIDAY -> DayType.LESSON_DAY
+            Calendar.SATURDAY -> DayType.NO_LESSON_DAY
+            else -> DayType.NO_LESSON_DAY
+        }
+    }
+
+    fun getTodayPlanInfo(cal: Calendar = Calendar.getInstance()): Pair<List<ScheduleItem>, String> {
+        val dayType = getDayType(cal)
+        val plan = when (dayType) {
+            DayType.SUNDAY_LIGHT_DAY -> SUNDAY_PLAN
+            DayType.LESSON_DAY -> LESSON_PLAN
+            DayType.NO_LESSON_DAY -> FREE_PLAN
+        }
+        return Pair(plan, dayType.label)
     }
 }

@@ -2,6 +2,7 @@ package com.example.data.local
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.media.AudioManager
 import com.example.data.model.HabitState
 import com.example.data.model.ScheduleItem
 import com.example.data.model.TaskTimeEngine
@@ -9,7 +10,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class HabitPreferences(context: Context) {
+class HabitPreferences(val context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("habit_local_prefs", Context.MODE_PRIVATE)
 
     companion object {
@@ -57,6 +58,10 @@ class HabitPreferences(context: Context) {
         private const val KEY_IS_BLOCKER_PAUSED = "is_blocker_paused"
         private const val KEY_USER_GEMINI_API_KEY = "user_gemini_api_key"
         private const val KEY_LAST_APPLIED_WALLPAPER_TASK_ID = "last_applied_wallpaper_task_id"
+        private const val KEY_VOCAB_VERSION = "vocab_cards_version_v3"
+        private const val CURRENT_VOCAB_VERSION = 3
+        private const val KEY_SCHEDULE_VERSION = "schedule_version_v3"
+        private const val CURRENT_SCHEDULE_VERSION = 3
 
         const val DEFAULT_BLOCKED_PACKAGES = "com.instagram.android,com.zhiliaoapp.musically,com.ss.android.ugc.trill,com.google.android.youtube"
         const val COOLDOWN_MINUTES = 30
@@ -197,6 +202,17 @@ class HabitPreferences(context: Context) {
         if (target == null && cleanTitle.isNotBlank()) {
             target = schedule.find {
                 it.title.lowercase().contains(cleanTitle) || cleanTitle.contains(it.title.lowercase())
+            }
+        }
+
+        // 3b. Match by alphanumeric stripped representation (handles 'yoʻl' vs 'yo\'l' vs 'yo l', etc.)
+        if (target == null && cleanTitle.isNotBlank()) {
+            val strippedClean = cleanTitle.replace(Regex("[^a-z0-9]"), "")
+            if (strippedClean.length >= 3) {
+                target = schedule.find {
+                    val strippedItem = it.title.lowercase().replace(Regex("[^a-z0-9]"), "")
+                    strippedItem == strippedClean || strippedItem.contains(strippedClean) || strippedClean.contains(strippedItem)
+                }
             }
         }
 
@@ -352,17 +368,26 @@ class HabitPreferences(context: Context) {
     }
 
     // --- Schedule Storage ---
+    fun resetToDefaultSchedule(): List<ScheduleItem> {
+        val todayStr = getTodayDateString()
+        val defaultList = TaskTimeEngine.getTodayPlanInfo().first
+        saveSchedule(defaultList)
+        prefs.edit()
+            .putString(KEY_SCHEDULE_DAY_KEY, todayStr)
+            .putInt(KEY_SCHEDULE_VERSION, CURRENT_SCHEDULE_VERSION)
+            .apply()
+        return defaultList
+    }
+
     fun getSchedule(): List<ScheduleItem> {
         val todayStr = getTodayDateString()
         val savedDay = prefs.getString(KEY_SCHEDULE_DAY_KEY, null)
         val rawJson = prefs.getString(KEY_SCHEDULE_JSON, null)
+        val savedVersion = prefs.getInt(KEY_SCHEDULE_VERSION, 0)
 
-        // If new day or empty schedule, load the actual day's plan from TaskTimeEngine
-        if (savedDay != todayStr || rawJson.isNullOrBlank()) {
-            val defaultList = TaskTimeEngine.getTodayPlanInfo().first
-            saveSchedule(defaultList)
-            prefs.edit().putString(KEY_SCHEDULE_DAY_KEY, todayStr).apply()
-            return defaultList
+        // If new day, empty schedule, or updated schedule engine version, load the actual day's plan from TaskTimeEngine
+        if (savedDay != todayStr || rawJson.isNullOrBlank() || savedVersion < CURRENT_SCHEDULE_VERSION) {
+            return resetToDefaultSchedule()
         }
 
         return try {
@@ -391,13 +416,26 @@ class HabitPreferences(context: Context) {
                 saveSchedule(defaultList)
                 defaultList
             } else {
+                val cal = java.util.Calendar.getInstance()
+                val isSunday = cal.get(java.util.Calendar.DAY_OF_WEEK) == java.util.Calendar.SUNDAY
+                val hasSchool = list.any {
+                    it.category.equals("school", ignoreCase = true) ||
+                    it.category.equals("rtm", ignoreCase = true) ||
+                    it.title.contains("Maktab", ignoreCase = true)
+                }
+
+                // If Sunday has school tasks, or weekday is missing school tasks, reset to today's exact plan
+                if ((isSunday && hasSchool) || (!isSunday && !hasSchool)) {
+                    val defaultList = TaskTimeEngine.getTodayPlanInfo().first
+                    saveSchedule(defaultList)
+                    return defaultList
+                }
+
                 val hasPeshin = list.any {
                     it.title.contains("Peshin", ignoreCase = true) ||
                     (it.category.equals("prayer", ignoreCase = true) && (it.start.startsWith("12:") || it.start.startsWith("13:")))
                 }
                 if (!hasPeshin) {
-                    val cal = java.util.Calendar.getInstance()
-                    val isSunday = cal.get(java.util.Calendar.DAY_OF_WEEK) == java.util.Calendar.SUNDAY
                     val peshin = if (isSunday) {
                         ScheduleItem(
                             id = "prayer_peshin_auto_restored",
@@ -520,47 +558,71 @@ class HabitPreferences(context: Context) {
     // --- Vocab Cards ---
     fun getVocabCards(): List<com.example.data.model.VocabCard> {
         val raw = prefs.getString(KEY_VOCAB_JSON, null)
-        if (raw.isNullOrBlank()) {
-            val defaults = listOf(
-                com.example.data.model.VocabCard(
-                    word = "Perseverance",
-                    translation = "Sabr-matonat, qat'iyat",
-                    phonetic = "/ˌpɜːrsəˈvɪrəns/",
-                    partOfSpeech = "noun",
-                    definition = "Persistence in doing something despite difficulty or delay in achieving success.",
-                    example = "His perseverance in studying English helped him achieve his goals.",
-                    mnemonic = "Sabr qilib har kuni davom ettirish",
-                    boxLevel = 1
-                ),
-                com.example.data.model.VocabCard(
-                    word = "Punctuality",
-                    translation = "Vaqtga rioya qilish, aniqlik",
-                    phonetic = "/ˌpʌŋktʃuˈæləti/",
-                    partOfSpeech = "noun",
-                    definition = "The quality of being on time.",
-                    example = "Punctuality is a crucial habit for daily success.",
-                    mnemonic = "Nuqta kabi har daqiqani aniq qilish",
-                    boxLevel = 2
-                ),
-                com.example.data.model.VocabCard(
-                    word = "Resilience",
-                    translation = "Chidamlilik, bardoshlik",
-                    phonetic = "/rɪˈzɪliəns/",
-                    partOfSpeech = "noun",
-                    definition = "The capacity to recover quickly from difficulties; toughness.",
-                    example = "Mental resilience allows you to stick to your schedule even when tired.",
-                    mnemonic = "Qiyinchilikdan tez tiklanish",
-                    boxLevel = 1
-                )
+        val savedVersion = prefs.getInt(KEY_VOCAB_VERSION, 0)
+
+        if (raw.isNullOrBlank() || savedVersion < CURRENT_VOCAB_VERSION) {
+            val defaults = com.example.data.util.Oxford3000Database.getAllOxfordCards(context)
+            if (raw.isNullOrBlank()) {
+                saveVocabCards(defaults)
+                prefs.edit().putInt(KEY_VOCAB_VERSION, CURRENT_VOCAB_VERSION).apply()
+                return defaults
+            }
+            // Merge existing cards to retain user mastery & reviews
+            val existing = parseVocabCardsJson(raw)
+            val existingByWord = existing.associateBy { it.word.lowercase(java.util.Locale.ROOT) }
+            val merged = mutableListOf<com.example.data.model.VocabCard>()
+
+            for (defCard in defaults) {
+                val matched = existingByWord[defCard.word.lowercase(java.util.Locale.ROOT)]
+                if (matched != null) {
+                    // Retain user's mastery, reviewCount, boxLevel, learnedDate
+                    merged.add(
+                        defCard.copy(
+                            id = matched.id,
+                            isMastered = matched.isMastered,
+                            boxLevel = matched.boxLevel,
+                            learnedDate = matched.learnedDate,
+                            reviewCount = matched.reviewCount,
+                            lastReviewedEpochMs = matched.lastReviewedEpochMs
+                        )
+                    )
+                } else {
+                    merged.add(defCard)
+                }
+            }
+
+            // Also keep any custom words the user added that aren't in Oxford database
+            val defaultWords = defaults.map { it.word.lowercase(java.util.Locale.ROOT) }.toSet()
+            for (ex in existing) {
+                if (!defaultWords.contains(ex.word.lowercase(java.util.Locale.ROOT))) {
+                    merged.add(ex)
+                }
+            }
+
+            val sorted = merged.sortedWith(
+                compareBy<com.example.data.model.VocabCard> { com.example.data.util.VocabDocumentParser.getLevelWeight(it.level) }
+                    .thenBy { it.word.lowercase(java.util.Locale.ROOT) }
             )
-            saveVocabCards(defaults)
-            return defaults
+
+            saveVocabCards(sorted)
+            prefs.edit().putInt(KEY_VOCAB_VERSION, CURRENT_VOCAB_VERSION).apply()
+            return sorted
         }
+
+        return parseVocabCardsJson(raw)
+    }
+
+    private fun parseVocabCardsJson(raw: String): List<com.example.data.model.VocabCard> {
         return try {
             val array = org.json.JSONArray(raw)
             val list = mutableListOf<com.example.data.model.VocabCard>()
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
+                val isMastered = obj.optBoolean("isMastered", false)
+                var lDate = obj.optString("learnedDate", "")
+                if (isMastered && lDate.isBlank()) {
+                    lDate = com.example.data.model.TaskTimeEngine.getIsoDateForOffset(0)
+                }
                 list.add(
                     com.example.data.model.VocabCard(
                         id = obj.optString("id", java.util.UUID.randomUUID().toString()),
@@ -570,11 +632,14 @@ class HabitPreferences(context: Context) {
                         partOfSpeech = obj.optString("partOfSpeech", "noun"),
                         definition = obj.optString("definition", ""),
                         example = obj.optString("example", ""),
+                        exampleTranslation = obj.optString("exampleTranslation", ""),
+                        synonym = obj.optString("synonym", ""),
                         mnemonic = obj.optString("mnemonic", ""),
                         boxLevel = obj.optInt("boxLevel", 1),
                         level = obj.optString("level", "A1"),
                         sourceDocName = obj.optString("sourceDocName", ""),
-                        isMastered = obj.optBoolean("isMastered", false),
+                        isMastered = isMastered,
+                        learnedDate = lDate,
                         reviewCount = obj.optInt("reviewCount", 0),
                         lastReviewedEpochMs = obj.optLong("lastReviewedEpochMs", System.currentTimeMillis())
                     )
@@ -598,11 +663,14 @@ class HabitPreferences(context: Context) {
                     put("partOfSpeech", c.partOfSpeech)
                     put("definition", c.definition)
                     put("example", c.example)
+                    put("exampleTranslation", c.exampleTranslation)
+                    put("synonym", c.synonym)
                     put("mnemonic", c.mnemonic)
                     put("boxLevel", c.boxLevel)
                     put("level", c.level)
                     put("sourceDocName", c.sourceDocName)
                     put("isMastered", c.isMastered)
+                    put("learnedDate", c.learnedDate)
                     put("reviewCount", c.reviewCount)
                     put("lastReviewedEpochMs", c.lastReviewedEpochMs)
                 }
@@ -612,6 +680,27 @@ class HabitPreferences(context: Context) {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    // --- Daily Active Vocabulary Batch Persistence ---
+    var todayVocabBatchDate: String
+        get() = prefs.getString("key_today_vocab_batch_date", "") ?: ""
+        set(value) = prefs.edit().putString("key_today_vocab_batch_date", value).apply()
+
+    fun getTodayVocabBatchIds(): List<String> {
+        val raw = prefs.getString("key_today_vocab_batch_ids", null) ?: return emptyList()
+        return try {
+            val arr = org.json.JSONArray(raw)
+            (0 until arr.length()).map { arr.getString(it) }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    fun saveTodayVocabBatchIds(ids: List<String>) {
+        val arr = org.json.JSONArray()
+        ids.distinct().forEach { arr.put(it) }
+        prefs.edit().putString("key_today_vocab_batch_ids", arr.toString()).apply()
     }
 
     // --- Alarm Sound & Volume ---
@@ -636,12 +725,54 @@ class HabitPreferences(context: Context) {
         set(value) = prefs.edit().putInt("key_previous_ringer_mode", value).apply()
 
     /**
-     * Absolute check whether any alarm, ringtone, or test sound must be completely muted:
-     * - Returns true if the user explicitly muted sounds in the top bar or settings (isAlarmMuted)
-     * - OR if the user is currently at school (isSchoolMuted or isAtSchool)
+     * Checks if phone system ringer is currently set to SILENT, VIBRATE, or volume is 0
      */
-    fun shouldMuteAlarm(): Boolean {
-        return isAlarmMuted || isSchoolMuted || isAtSchool
+    fun isPhoneInSilentOrVibrateMode(ctx: Context? = null): Boolean {
+        val c = ctx ?: context
+        return try {
+            val audioManager = c.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
+            when (audioManager.ringerMode) {
+                AudioManager.RINGER_MODE_SILENT, AudioManager.RINGER_MODE_VIBRATE -> true
+                else -> {
+                    val ringVolume = audioManager.getStreamVolume(AudioManager.STREAM_RING)
+                    val alarmVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
+                    ringVolume == 0 || alarmVolume == 0
+                }
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Checks if phone system ringer is currently set to completely SILENT
+     */
+    fun isPhoneInCompleteSilentMode(ctx: Context? = null): Boolean {
+        val c = ctx ?: context
+        return try {
+            val audioManager = c.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
+            audioManager.ringerMode == AudioManager.RINGER_MODE_SILENT
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Absolute check whether any alarm, ringtone, or test sound must be completely muted:
+     * - Returns true if user muted sounds in top bar or settings (isAlarmMuted)
+     * - OR if user is at school (isSchoolMuted or isAtSchool)
+     * - OR if user set their phone itself to silent / vibrate / mute
+     */
+    fun shouldMuteAlarm(ctx: Context? = null): Boolean {
+        if (isAlarmMuted || isSchoolMuted || isAtSchool) return true
+        return isPhoneInSilentOrVibrateMode(ctx)
+    }
+
+    /**
+     * Check whether vibration should also be silenced (e.g. phone in completely silent mode)
+     */
+    fun shouldMuteVibration(ctx: Context? = null): Boolean {
+        return isPhoneInCompleteSilentMode(ctx)
     }
 
     /**
@@ -669,8 +800,8 @@ class HabitPreferences(context: Context) {
 
     // --- Daily Vocabulary Target & Goal ---
     var dailyVocabGoal: Int
-        get() = prefs.getInt("key_daily_vocab_goal", 10).coerceAtLeast(10)
-        set(value) = prefs.edit().putInt("key_daily_vocab_goal", value.coerceAtLeast(10)).apply()
+        get() = prefs.getInt("key_daily_vocab_goal", 10).coerceIn(1, 200)
+        set(value) = prefs.edit().putInt("key_daily_vocab_goal", value.coerceIn(1, 200)).apply()
 
     var vocabLearnedTodayCount: Int
         get() = prefs.getInt("key_vocab_learned_${getTodayDateString()}", 0)
@@ -678,6 +809,30 @@ class HabitPreferences(context: Context) {
 
     fun incrementVocabLearnedToday() {
         vocabLearnedTodayCount = vocabLearnedTodayCount + 1
+    }
+
+    // --- Daily Vocab Quiz State (≥90% pass rule & retry failed words) ---
+    fun isQuizPassedToday(): Boolean {
+        return prefs.getBoolean("key_quiz_passed_${getTodayDateString()}", false)
+    }
+
+    fun markQuizPassedToday() {
+        prefs.edit()
+            .putBoolean("key_quiz_passed_${getTodayDateString()}", true)
+            .remove("key_quiz_failed_ids_${getTodayDateString()}")
+            .apply()
+    }
+
+    fun getQuizFailedWordIds(): Set<String> {
+        return prefs.getStringSet("key_quiz_failed_ids_${getTodayDateString()}", emptySet()) ?: emptySet()
+    }
+
+    fun setQuizFailedWordIds(ids: Set<String>) {
+        prefs.edit().putStringSet("key_quiz_failed_ids_${getTodayDateString()}", ids).apply()
+    }
+
+    fun clearQuizFailedWordIds() {
+        prefs.edit().remove("key_quiz_failed_ids_${getTodayDateString()}").apply()
     }
 
     // --- Journal Entries ---
@@ -841,6 +996,23 @@ class HabitPreferences(context: Context) {
         }
     }
 
+    fun syncGeofenceCoords(rLat: Double, rLng: Double, mLat: Double, mLng: Double, rad: Float) {
+        rtmLat = rLat
+        rtmLng = rLng
+        maktabLat = mLat
+        maktabLng = mLng
+        radiusMeters = rad
+
+        val list = getCustomLocations().map { loc ->
+            when (loc.id) {
+                "rtm" -> loc.copy(lat = rLat, lng = rLng, radiusMeters = rad)
+                "maktab" -> loc.copy(lat = mLat, lng = mLng, radiusMeters = rad)
+                else -> loc
+            }
+        }
+        saveCustomLocations(list)
+    }
+
     fun addCustomLocation(location: com.example.data.model.CustomLocation) {
         val current = getCustomLocations().toMutableList()
         current.removeAll { it.id == location.id }
@@ -861,5 +1033,60 @@ class HabitPreferences(context: Context) {
 
     fun saveBlockedPackageSet(packages: Set<String>) {
         blockedPackages = packages.joinToString(",")
+    }
+
+    // --- Temporary Emergency Bypass (Favqulodda ruxsat) ---
+    fun setTemporaryEmergencyBypass(durationMinutes: Int = 5) {
+        val expiry = System.currentTimeMillis() + (durationMinutes * 60 * 1000L)
+        prefs.edit().putLong("key_emergency_bypass_until_ms", expiry).apply()
+    }
+
+    fun isEmergencyBypassActive(): Boolean {
+        val expiry = prefs.getLong("key_emergency_bypass_until_ms", 0L)
+        return System.currentTimeMillis() < expiry
+    }
+
+    fun getEmergencyBypassRemainingSeconds(): Int {
+        val expiry = prefs.getLong("key_emergency_bypass_until_ms", 0L)
+        val diff = expiry - System.currentTimeMillis()
+        return if (diff > 0) (diff / 1000L).toInt() else 0
+    }
+
+    fun clearEmergencyBypass() {
+        prefs.edit().remove("key_emergency_bypass_until_ms").apply()
+    }
+
+    // --- 1 Oylik Ingliz Tili Rejasi (A2) ---
+    fun getActiveEnglishPlanWeek(): Int {
+        return prefs.getInt("key_active_english_plan_week", 1).coerceIn(1, 4)
+    }
+
+    fun setActiveEnglishPlanWeek(week: Int) {
+        prefs.edit().putInt("key_active_english_plan_week", week.coerceIn(1, 4)).apply()
+    }
+
+    fun getCompletedEnglishPlanTaskIds(): Set<String> {
+        val raw = prefs.getString("key_completed_english_plan_task_ids", "") ?: ""
+        if (raw.isBlank()) return emptySet()
+        return raw.split(",").map { it.trim() }.filter { it.isNotBlank() }.toSet()
+    }
+
+    fun toggleEnglishPlanTaskId(taskId: String): Boolean {
+        val current = getCompletedEnglishPlanTaskIds().toMutableSet()
+        val isNowCompleted = if (current.contains(taskId)) {
+            current.remove(taskId)
+            false
+        } else {
+            current.add(taskId)
+            true
+        }
+        prefs.edit().putString("key_completed_english_plan_task_ids", current.joinToString(",")).apply()
+        return isNowCompleted
+    }
+
+    fun setEnglishPlanTaskCompleted(taskId: String, isCompleted: Boolean) {
+        val current = getCompletedEnglishPlanTaskIds().toMutableSet()
+        if (isCompleted) current.add(taskId) else current.remove(taskId)
+        prefs.edit().putString("key_completed_english_plan_task_ids", current.joinToString(",")).apply()
     }
 }

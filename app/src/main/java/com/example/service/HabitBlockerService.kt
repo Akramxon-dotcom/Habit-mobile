@@ -78,17 +78,41 @@ class HabitBlockerService : AccessibilityService() {
 
         val packageName = event.packageName?.toString() ?: return
 
-        // Skip system and self
-        if (packageName == applicationContext.packageName ||
+        // 1. Skip our own app completely (Habit app, settings, block activity) and Android core system UI
+        val myPkg = applicationContext.packageName
+        if (packageName.equals(myPkg, ignoreCase = true) ||
+            packageName.contains("habit", ignoreCase = true) ||
+            packageName.contains("kzrqom", ignoreCase = true) ||
+            packageName.startsWith("com.example.") ||
+            packageName == "com.example" ||
             packageName == "android" ||
-            packageName == "com.android.systemui" ||
-            packageName.contains("launcher")
+            packageName == "com.android.systemui"
         ) {
+            return
+        }
+
+        // 2. If FocusBlockActivity is already visible and active, ignore events from system
+        if (com.example.ui.block.FocusBlockActivity.isVisible) {
+            // If another third-party blocked app somehow tried to open, send HOME to dismiss it
+            val blockedPkgs = prefs.getBlockedPackagesList()
+            if (blockedPkgs.any { it.equals(packageName, ignoreCase = true) } || isCommonDistractionApp(packageName)) {
+                performGlobalAction(GLOBAL_ACTION_HOME)
+            }
             return
         }
 
         // Check if master blocker is paused by user
         if (prefs.isBlockerPaused) {
+            return
+        }
+
+        // Check if temporary emergency bypass is active
+        if (prefs.isEmergencyBypassActive()) {
+            return
+        }
+
+        // Check if current app is launcher or dialer/call (phone calls are completely free)
+        if (isLauncherApp(packageName) || isDialerOrCallApp(packageName)) {
             return
         }
 
@@ -100,27 +124,105 @@ class HabitBlockerService : AccessibilityService() {
 
         if (!isFirestoreActive && !isScheduleActive) return
 
-        val blockedPackages = prefs.getBlockedPackagesList()
-        val isBlockedApp = blockedPackages.any { it.equals(packageName, ignoreCase = true) }
+        val currentTaskTitle = when {
+            activeScheduleItem != null && isScheduleActive -> activeScheduleItem.title
+            isFirestoreActive -> cached.title
+            else -> "Fokus vaqti"
+        }
+        val currentTaskStart = when {
+            activeScheduleItem != null && isScheduleActive -> activeScheduleItem.start
+            isFirestoreActive -> cached.start
+            else -> ""
+        }
+        val currentTaskEnd = when {
+            activeScheduleItem != null && isScheduleActive -> activeScheduleItem.end
+            isFirestoreActive -> cached.end
+            else -> ""
+        }
 
-        if (isBlockedApp) {
-            Log.w(TAG, "Taqiqlangan ilova ochildi ($packageName)! Uy ekraniga qaytarilmoqda.")
-            // Redirect to home screen immediately
+        // If app is not system or dialer/launcher, block it!
+        val blockedPackages = prefs.getBlockedPackagesList()
+        val isExplicitlyBlocked = blockedPackages.any { it.equals(packageName, ignoreCase = true) }
+        val shouldBlock = isExplicitlyBlocked || blockedPackages.isEmpty() || isCommonDistractionApp(packageName)
+
+        if (shouldBlock) {
+            Log.w(TAG, "Qat'iy blokirovka: $packageName ochildi! Chiqarib yuborish va FocusBlockActivity ko'rsatilmoqda.")
+
+            // 1. Immediately kick the user out of the blocked app back to HOME
             performGlobalAction(GLOBAL_ACTION_HOME)
 
-            // Show Toast with cooldown
             val now = System.currentTimeMillis()
-            if (now - lastToastTime > TOAST_COOLDOWN_MS) {
-                lastToastTime = now
-                mainHandler.post {
-                    Toast.makeText(
-                        applicationContext,
-                        "🚫 Habit: Hozir band vaqtingiz! Chalg'ituvchi ilova bloklandi.",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
+            if (now - lastBlockActivityLaunchTime > BLOCK_COOLDOWN_MS) {
+                lastBlockActivityLaunchTime = now
+                // 2. Launch FocusBlockActivity on top of Home with a short delay
+                mainHandler.postDelayed({
+                    try {
+                        val blockIntent = Intent(applicationContext, com.example.ui.block.FocusBlockActivity::class.java).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+                            putExtra("task_title", currentTaskTitle)
+                            putExtra("task_time", "$currentTaskStart — $currentTaskEnd")
+                        }
+                        startActivity(blockIntent)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }, 120L)
             }
         }
+    }
+
+    private var lastBlockActivityLaunchTime = 0L
+    private val BLOCK_COOLDOWN_MS = 1000L
+
+    private fun isDialerOrCallApp(packageName: String): Boolean {
+        val lower = packageName.lowercase()
+        if (lower.contains("dialer") ||
+            lower.contains("incallui") ||
+            lower.contains("telecom") ||
+            lower.contains("phone") ||
+            lower.contains("contacts")
+        ) {
+            return true
+        }
+        try {
+            val telecomManager = getSystemService(Context.TELECOM_SERVICE) as? android.telecom.TelecomManager
+            val defaultDialer = telecomManager?.defaultDialerPackage
+            if (defaultDialer != null && defaultDialer.equals(packageName, ignoreCase = true)) {
+                return true
+            }
+        } catch (e: Exception) {
+            // ignore
+        }
+        return false
+    }
+
+    private fun isLauncherApp(packageName: String): Boolean {
+        val lower = packageName.lowercase()
+        if (lower.contains("launcher") || lower.contains("trebuchet") || lower.contains("home")) {
+            return true
+        }
+        try {
+            val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            val resolveInfo = packageManager.resolveActivity(intent, 0)
+            if (resolveInfo?.activityInfo?.packageName?.equals(packageName, ignoreCase = true) == true) {
+                return true
+            }
+        } catch (e: Exception) {
+            // ignore
+        }
+        return false
+    }
+
+    private fun isCommonDistractionApp(packageName: String): Boolean {
+        val lower = packageName.lowercase()
+        val distractKeywords = listOf(
+            "telegram", "instagram", "tiktok", "youtube", "facebook", "twitter",
+            "browser", "chrome", "firefox", "opera", "game", "pubg", "reels",
+            "shorts", "vk", "whatsapp", "snapchat", "pinterest", "netflix"
+        )
+        return distractKeywords.any { lower.contains(it) }
     }
 
     override fun onInterrupt() {

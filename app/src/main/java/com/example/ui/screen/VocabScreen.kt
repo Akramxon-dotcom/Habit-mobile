@@ -2,6 +2,7 @@ package com.example.ui.screen
 
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.School
@@ -56,13 +58,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
@@ -74,6 +76,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.QuizQuestion
+import com.example.data.model.TaskTimeEngine
 import com.example.data.model.VocabCard
 import com.example.ui.theme.LocalLiquidTheme
 
@@ -81,11 +84,13 @@ import com.example.ui.theme.LocalLiquidTheme
 fun VocabScreen(
     cards: List<VocabCard>,
     isLoading: Boolean,
+    todayBatchCardIds: List<String> = emptyList(),
     dailyGoal: Int = 10,
     learnedToday: Int = 0,
     isDocumentParsing: Boolean = false,
     documentStatus: String = "",
     onSetDailyGoal: (Int) -> Unit = {},
+    onAddMoreDailyWords: () -> Unit = {},
     onImportDocument: (Uri, String) -> Unit = { _, _ -> },
     onImportText: (String, String) -> Unit = { _, _ -> },
     onLoadSampleCefr: () -> Unit = {},
@@ -95,24 +100,38 @@ fun VocabScreen(
     onManualAddWord: (VocabCard) -> Unit = {},
     onDeleteWord: (String) -> Unit,
     onUpdateBoxLevel: (String, Int) -> Unit,
-    onGenerateQuiz: () -> Unit,
+    onGenerateQuiz: (retryOnly: Boolean) -> Unit,
     quizQuestions: List<QuizQuestion>,
     isQuizLoading: Boolean,
+    isQuizPassedToday: Boolean = false,
+    quizFailedWordIds: Set<String> = emptySet(),
+    onSubmitQuizResults: (correctCardIds: List<String>, failedCardIds: List<String>) -> Unit = { _, _ -> },
     onCloseQuiz: () -> Unit,
+    activeEnglishPlanWeek: Int = 1,
+    completedEnglishPlanTaskIds: Set<String> = emptySet(),
+    onSelectEnglishPlanWeek: (Int) -> Unit = {},
+    onToggleEnglishPlanTask: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val theme = LocalLiquidTheme.current
     val context = LocalContext.current
 
+    // View tab: "TODAY" (Bugungi me'yor), "PLAN" (1 Oylik Reja), "VAULT" (Sandiqdagi barcha so'zlar), "MASTERED" (Yodlanganlar)
+    var selectedViewMode by remember { mutableStateOf("TODAY") }
     var selectedLevelFilter by remember { mutableStateOf("ALL") }
-    var showAddDialog by remember { mutableStateOf(false) }
+    var selectedMasteredDateOffset by remember { mutableIntStateOf(0) } // 0 = Bugun, -1 = Kecha, etc., 999 = Barchasi
+    var selectedPlanSubSection by remember { mutableStateOf("TASKS") }
+
+    // Dialog states
+    var showUploadModal by remember { mutableStateOf(false) }
+    var showAddSingleDialog by remember { mutableStateOf(false) }
     var showManualTextDialog by remember { mutableStateOf(false) }
-    var wordInput by remember { mutableStateOf("") }
-    var manualTextInput by remember { mutableStateOf("") }
-    var manualDocTitle by remember { mutableStateOf("Mening lug'atim") }
     var showQuizDialog by remember { mutableStateOf(false) }
 
-    // File picker launcher for document upload (PDF, DOCX, TXT, CSV)
+    var singleWordInput by remember { mutableStateOf("") }
+    var manualTextInput by remember { mutableStateOf("") }
+
+    // Document picker
     val docPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -132,16 +151,36 @@ fun VocabScreen(
         }
     }
 
-    val masteredCount = cards.count { it.isMastered }
+    val unmasteredCards = cards.filter { !it.isMastered }
+    val masteredCards = cards.filter { it.isMastered }
     val totalCount = cards.size
-    val allCompleted = totalCount > 0 && masteredCount == totalCount
+    val masteredCount = masteredCards.size
 
-    // Filter cards by CEFR level
-    val filteredCards = when (selectedLevelFilter) {
-        "ALL" -> cards
-        "UNLEARNED" -> cards.filter { !it.isMastered }
-        "MASTERED" -> cards.filter { it.isMastered }
-        else -> cards.filter { it.level.equals(selectedLevelFilter, ignoreCase = true) }
+    // Today's active cards based on current batch tracking
+    val todayCards = if (todayBatchCardIds.isNotEmpty()) {
+        val batchSet = todayBatchCardIds.toSet()
+        val inBatch = unmasteredCards.filter { it.id in batchSet }
+        if (inBatch.isNotEmpty()) inBatch else unmasteredCards.take(dailyGoal)
+    } else {
+        unmasteredCards.take(dailyGoal)
+    }
+
+    // Mastered cards filtered by selected date
+    val filteredMasteredCards = if (selectedMasteredDateOffset == 999) {
+        masteredCards
+    } else {
+        val targetIso = TaskTimeEngine.getIsoDateForOffset(selectedMasteredDateOffset)
+        masteredCards.filter { it.learnedDate == targetIso }
+    }
+
+    val activeDisplayCards = when (selectedViewMode) {
+        "TODAY" -> todayCards
+        "MASTERED" -> filteredMasteredCards
+        else -> {
+            // "VAULT" (Sandiqdagi so'zlar) with level filter
+            if (selectedLevelFilter == "ALL") unmasteredCards
+            else unmasteredCards.filter { it.level.equals(selectedLevelFilter, ignoreCase = true) }
+        }
     }
 
     LazyColumn(
@@ -150,7 +189,7 @@ fun VocabScreen(
             .padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Top Header
+        // 1. TOP HEADER & ACTION BUTTONS (Sinov & ➕ Yuklash mini-window)
         item {
             Spacer(modifier = Modifier.height(16.dp))
             Row(
@@ -158,188 +197,143 @@ fun VocabScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "📚 Lug'at & CEFR Tizimi",
+                        text = "📚 Lug'at",
                         color = theme.textPrimary,
                         fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Serif
                     )
                     Text(
-                        text = "A1–C2 darajalar bo'yicha intizomli so'z yodlash",
+                        text = "A1–C1 darajalar · Sandiq tizimi",
                         color = theme.textSecondary,
-                        fontSize = 12.5.sp
+                        fontSize = 12.sp
                     )
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = {
-                            showQuizDialog = true
-                            onGenerateQuiz()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = theme.glassSurfaceElevated),
-                        border = BorderStroke(1.dp, theme.glassBorderSubtle),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.testTag("btn_start_quiz")
-                    ) {
-                        Icon(Icons.Default.Psychology, contentDescription = null, tint = theme.primaryAccent, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Quiz", color = theme.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
-        // 1. PRIMARY HERO COMPONENT: DOCUMENT UPLOAD DROP/TAP ZONE
-        item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        docPickerLauncher.launch(
-                            arrayOf(
-                                "application/pdf",
-                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                "application/msword",
-                                "text/plain",
-                                "*/*"
+                    // SINOV / QAYTA YECHISH TUGMASI
+                    if (isQuizPassedToday) {
+                        Button(
+                            onClick = {
+                                Toast.makeText(
+                                    context,
+                                    "✅ Bugungi sinov muvaffaqiyatli topshirilgan (90%+). Yangi sinov ertaga ochiladi!",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32).copy(alpha = 0.22f)),
+                            border = BorderStroke(1.dp, Color(0xFF4CAF50)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.testTag("btn_quiz_passed")
+                        ) {
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = Color(0xFF4CAF50),
+                                modifier = Modifier.size(16.dp)
                             )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Column {
+                                Text(
+                                    text = "Sinov topshirildi",
+                                    color = Color(0xFF4CAF50),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Ertaga yangi sinov",
+                                    color = theme.textSecondary,
+                                    fontSize = 8.5.sp
+                                )
+                            }
+                        }
+                    } else if (quizFailedWordIds.isNotEmpty()) {
+                        Button(
+                            onClick = {
+                                showQuizDialog = true
+                                onGenerateQuiz(true)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100).copy(alpha = 0.25f)),
+                            border = BorderStroke(1.dp, Color(0xFFFF9800)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.testTag("btn_retry_quiz")
+                        ) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = null,
+                                tint = Color(0xFFFF9800),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Column {
+                                Text(
+                                    text = "Qayta yechish",
+                                    color = Color(0xFFFF9800),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "${quizFailedWordIds.size} ta xato so'z",
+                                    color = theme.textSecondary,
+                                    fontSize = 8.5.sp
+                                )
+                            }
+                        }
+                    } else {
+                        Button(
+                            onClick = {
+                                showQuizDialog = true
+                                onGenerateQuiz(false)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = theme.glassSurfaceElevated),
+                            border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.testTag("btn_start_quiz")
+                        ) {
+                            Icon(
+                                Icons.Default.Psychology,
+                                contentDescription = null,
+                                tint = theme.primaryAccent,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Sinov",
+                                color = theme.textPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    // YUKLASH TUGMASI (Opens upload mini-window in top right)
+                    Button(
+                        onClick = { showUploadModal = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.testTag("btn_open_upload_modal")
+                    ) {
+                        Icon(
+                            Icons.Default.CloudUpload,
+                            contentDescription = null,
+                            tint = Color.Black,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Yuklash",
+                            color = Color.Black,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
-                    .testTag("btn_upload_document_card"),
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
-                border = BorderStroke(1.5.dp, theme.primaryAccent.copy(alpha = 0.55f))
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(54.dp)
-                            .clip(CircleShape)
-                            .background(theme.primaryAccent.copy(alpha = 0.15f))
-                            .border(1.dp, theme.primaryAccent.copy(alpha = 0.4f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (isDocumentParsing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
-                                color = theme.primaryAccent,
-                                strokeWidth = 2.5.dp
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.CloudUpload,
-                                contentDescription = "Hujjat yuklash",
-                                tint = theme.primaryAccent,
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Text(
-                        text = if (isDocumentParsing) "Hujjat o'rganilmoqda..." else "Hujjatni yuklash",
-                        color = theme.textPrimary,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Serif
-                    )
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Text(
-                        text = if (isDocumentParsing) "So'zlar va A1–C2 darajalari ajratilmoqda..." else "Faylni tanlash yoki shu yerga tashlash uchun bosing",
-                        color = theme.textSecondary,
-                        fontSize = 12.5.sp,
-                        textAlign = TextAlign.Center
-                    )
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Document formats chip & Sample loader
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = theme.glassSurface,
-                            border = BorderStroke(1.dp, theme.glassBorderSubtle)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Default.Description, contentDescription = null, tint = theme.primaryAccent, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("PDF, DOCX, TXT", color = theme.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.width(8.dp))
-
-                        Surface(
-                            onClick = onLoadSampleCefr,
-                            shape = RoundedCornerShape(10.dp),
-                            color = theme.primaryAccent.copy(alpha = 0.12f),
-                            border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.35f))
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Default.School, contentDescription = null, tint = theme.primaryAccent, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("CEFR to'plami (Demo)", color = theme.primaryAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
                 }
             }
         }
 
-        // Secondary / Small input methods bar (As user requested: "kichik usul bo'lsin")
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = { showManualTextDialog = true },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, theme.glassBorderSubtle),
-                    colors = ButtonDefaults.outlinedButtonColors(containerColor = theme.glassSurface)
-                ) {
-                    Icon(Icons.Default.Edit, contentDescription = null, tint = theme.textSecondary, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Matn nusxasini qo'yish", color = theme.textSecondary, fontSize = 11.5.sp)
-                }
-
-                OutlinedButton(
-                    onClick = { showAddDialog = true },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, theme.glassBorderSubtle),
-                    colors = ButtonDefaults.outlinedButtonColors(containerColor = theme.glassSurface)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, tint = theme.primaryAccent, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Yagona so'z kiritish", color = theme.textPrimary, fontSize = 11.5.sp)
-                }
-            }
-        }
-
-        // 2. DAILY GOAL & LEARNING PROGRESS PANEL (MINIMUM 10 TA)
+        // 2. ENG YUQORIDA: KUNLIK YODLASH ME'YORI & SANDIQ PROGRESSI
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -368,20 +362,26 @@ fun VocabScreen(
                                 }
                             }
                             Text(
-                                text = "Bugun: $learnedToday / $dailyGoal ta so'z (kamida 10 ta)",
+                                text = "Bugun yodlandi: $learnedToday / $dailyGoal ta so'z",
                                 color = theme.textSecondary,
                                 fontSize = 12.sp
                             )
                         }
 
-                        // Stepper: [-] and [+]
+                        // Stepper: [-] and [+] with immediate real-time updates (from 1 up to 200)
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Surface(
                                 onClick = {
-                                    if (dailyGoal > 10) onSetDailyGoal(dailyGoal - 5)
+                                    val newGoal = when {
+                                        dailyGoal > 10 -> dailyGoal - 5
+                                        dailyGoal > 5 -> 5
+                                        dailyGoal > 1 -> dailyGoal - 1
+                                        else -> 1
+                                    }
+                                    onSetDailyGoal(newGoal)
                                 },
                                 shape = CircleShape,
                                 color = theme.glassSurface,
@@ -389,20 +389,28 @@ fun VocabScreen(
                                 modifier = Modifier.size(32.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
-                                    Text("−", color = if (dailyGoal > 10) theme.textPrimary else theme.textSecondary.copy(alpha = 0.3f), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        "−",
+                                        color = if (dailyGoal > 1) theme.textPrimary else theme.textSecondary.copy(alpha = 0.3f),
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
                             }
 
                             Text(
                                 text = "$dailyGoal",
                                 color = theme.primaryAccent,
-                                fontSize = 15.sp,
+                                fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 4.dp)
                             )
 
                             Surface(
-                                onClick = { onSetDailyGoal(dailyGoal + 5) },
+                                onClick = {
+                                    val newGoal = if (dailyGoal < 5) 5 else (dailyGoal + 5).coerceAtMost(200)
+                                    onSetDailyGoal(newGoal)
+                                },
                                 shape = CircleShape,
                                 color = theme.glassSurface,
                                 border = BorderStroke(1.dp, theme.glassBorderSubtle),
@@ -429,19 +437,20 @@ fun VocabScreen(
                         strokeCap = StrokeCap.Round
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
+                    // Sandiq holati: displays vault status and distribution
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "O'rganilishi lozim: ${(totalCount - masteredCount).coerceAtLeast(0)} ta so'z",
+                            text = "📦 Sandiqda: ${unmasteredCards.size} ta so'z",
                             color = theme.textSecondary,
                             fontSize = 11.5.sp
                         )
                         Text(
-                            text = "Yodlangan: $masteredCount / $totalCount",
+                            text = "✅ Jami yodlangan: $masteredCount / $totalCount",
                             color = theme.primaryAccent,
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.SemiBold
@@ -451,100 +460,146 @@ fun VocabScreen(
             }
         }
 
-        // 3. ALL WORDS MASTERED NOTIFICATION CARD
-        if (allCompleted) {
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = theme.dialogSurface),
-                    border = BorderStroke(1.5.dp, theme.primaryAccent)
-                ) {
-                    Column(
+        // 3. MAIN SECTION SELECTOR TABS: "Bugungi so'zlar", "1 Oylik Reja", "Sandiq", "Yodlanganlar"
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                val tabs = listOf(
+                    "TODAY" to "🎯 Bugun (${todayCards.size})",
+                    "PLAN" to "🗓️ 1 Oylik Reja",
+                    "VAULT" to "📦 Sandiq (${unmasteredCards.size})",
+                    "MASTERED" to "✅ Yodlangan (${masteredCards.size})"
+                )
+
+                tabs.forEach { (mode, label) ->
+                    val isSelected = selectedViewMode == mode
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(20.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isSelected) theme.primaryAccent else theme.glassSurface)
+                            .border(1.dp, if (isSelected) theme.primaryAccent else theme.glassBorderSubtleColor, RoundedCornerShape(12.dp))
+                            .clickable { selectedViewMode = mode }
+                            .padding(vertical = 9.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text("🎉", fontSize = 36.sp)
-                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Siz barcha so'zlarni yodlab bo'ldingiz!",
-                            color = theme.primaryAccent,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
-                            textAlign = TextAlign.Center
+                            text = label,
+                            color = if (isSelected) Color.Black else theme.textPrimary,
+                            fontSize = 10.5.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Hujjatdagi hamma so'zlar to'liq o'zlashtirildi. Bilimingizni yanada oshirish uchun yangi hujjat yuklang yoki yangi so'zlar qo'shing.",
-                            color = theme.textSecondary,
-                            fontSize = 12.5.sp,
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(14.dp))
-                        Button(
-                            onClick = {
-                                docPickerLauncher.launch(arrayOf("*/*"))
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
-                            shape = RoundedCornerShape(12.dp)
+                    }
+                }
+            }
+        }
+
+        if (selectedViewMode == "PLAN") {
+            monthlyPlanLazyItems(
+                activeWeek = activeEnglishPlanWeek,
+                completedTaskIds = completedEnglishPlanTaskIds,
+                selectedSubSection = selectedPlanSubSection,
+                onSelectSubSection = { selectedPlanSubSection = it },
+                onSelectWeek = onSelectEnglishPlanWeek,
+                onToggleTask = onToggleEnglishPlanTask,
+                theme = theme
+            )
+        } else {
+            // 4. CEFR LEVEL FILTER CHIPS (Visible in Sandiq mode)
+            if (selectedViewMode == "VAULT") {
+            item {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    val levels = listOf(
+                        "ALL" to "Barchasi (${unmasteredCards.size})",
+                        "A1" to "A1 (${unmasteredCards.count { it.level.equals("A1", true) }})",
+                        "A2" to "A2 (${unmasteredCards.count { it.level.equals("A2", true) }})",
+                        "B1" to "B1 (${unmasteredCards.count { it.level.equals("B1", true) }})",
+                        "B2" to "B2 (${unmasteredCards.count { it.level.equals("B2", true) }})",
+                        "C1" to "C1 (${unmasteredCards.count { it.level.equals("C1", true) }})"
+                    )
+                    items(levels) { (lvlKey, label) ->
+                        val isSelected = selectedLevelFilter == lvlKey
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isSelected) theme.primaryAccent.copy(alpha = 0.2f) else theme.glassSurface)
+                                .border(1.dp, if (isSelected) theme.primaryAccent else theme.glassBorderSubtleColor, RoundedCornerShape(10.dp))
+                                .clickable { selectedLevelFilter = lvlKey }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
                         ) {
-                            Icon(Icons.Default.CloudUpload, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Yangi so'zlarni qo'shing", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
+                            Text(
+                                text = label,
+                                color = if (isSelected) theme.primaryAccent else theme.textSecondary,
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            )
                         }
                     }
                 }
             }
         }
 
-        // 4. CEFR LEVEL FILTER CHIPS
-        item {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                val levels = listOf(
-                    "ALL" to "Barchasi (${cards.size})",
-                    "UNLEARNED" to "O'rganishda (${cards.count { !it.isMastered }})",
-                    "A1" to "A1 (${cards.count { it.level.equals("A1", true) }})",
-                    "A2" to "A2 (${cards.count { it.level.equals("A2", true) }})",
-                    "B1" to "B1 (${cards.count { it.level.equals("B1", true) }})",
-                    "B2" to "B2 (${cards.count { it.level.equals("B2", true) }})",
-                    "C1" to "C1 (${cards.count { it.level.equals("C1", true) }})",
-                    "C2" to "C2 (${cards.count { it.level.equals("C2", true) }})",
-                    "MASTERED" to "Yodlangan (${masteredCount})"
-                )
-                items(levels) { (lvlKey, label) ->
-                    val isSelected = selectedLevelFilter == lvlKey
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(if (isSelected) theme.primaryAccent else theme.glassSurface)
-                            .border(1.dp, if (isSelected) theme.primaryAccent else theme.glassBorderSubtleColor, RoundedCornerShape(14.dp))
-                            .clickable { selectedLevelFilter = lvlKey }
-                            .padding(horizontal = 14.dp, vertical = 8.dp)
+        // 4b. DATE FILTER CHIPS (Visible in Yodlanganlar / Mastered mode)
+        if (selectedViewMode == "MASTERED") {
+            item {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "📅 Yodlangan so'zlar tarixi (Kunlar bo'yicha):",
+                        color = theme.textSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(
-                            text = label,
-                            color = if (isSelected) Color.Black else theme.textPrimary,
-                            fontSize = 11.5.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                        val todayIso = TaskTimeEngine.getIsoDateForOffset(0)
+                        val yesterdayIso = TaskTimeEngine.getIsoDateForOffset(-1)
+                        val dateOptions = listOf(
+                            0 to "Bugun (${masteredCards.count { it.learnedDate == todayIso }})",
+                            -1 to "Kecha (${masteredCards.count { it.learnedDate == yesterdayIso }})",
+                            -2 to "${TaskTimeEngine.getDisplayDateForOffset(-2)} (${masteredCards.count { it.learnedDate == TaskTimeEngine.getIsoDateForOffset(-2) }})",
+                            -3 to "${TaskTimeEngine.getDisplayDateForOffset(-3)} (${masteredCards.count { it.learnedDate == TaskTimeEngine.getIsoDateForOffset(-3) }})",
+                            999 to "Barchasi ($masteredCount)"
                         )
+                        items(dateOptions) { (offset, label) ->
+                            val isDateSelected = selectedMasteredDateOffset == offset
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isDateSelected) theme.primaryAccent.copy(alpha = 0.25f) else theme.glassSurface)
+                                    .border(1.dp, if (isDateSelected) theme.primaryAccent else theme.glassBorderSubtleColor, RoundedCornerShape(10.dp))
+                                    .clickable { selectedMasteredDateOffset = offset }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = if (isDateSelected) theme.primaryAccent else theme.textSecondary,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isDateSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // 5. CARDS LIST
-        if (filteredCards.isEmpty()) {
+        // 5. VOCABULARY CARDS LIST
+        if (activeDisplayCards.isEmpty()) {
             item {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 20.dp),
+                        .padding(vertical = 16.dp),
                     shape = RoundedCornerShape(18.dp),
                     colors = CardDefaults.cardColors(containerColor = theme.glassSurface),
                     border = BorderStroke(1.dp, theme.glassBorderSubtle)
@@ -552,29 +607,61 @@ fun VocabScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(28.dp),
+                            .padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text("📄", fontSize = 32.sp)
+                        Text("📦", fontSize = 32.sp)
                         Spacer(modifier = Modifier.height(10.dp))
                         Text(
-                            text = if (cards.isEmpty()) "Hali lug'at yuklanmagan" else "Ushbu bo'limda so'zlar yo'q",
+                            text = when (selectedViewMode) {
+                                "TODAY" -> if (unmasteredCards.isEmpty()) "Sandiqda barcha so'zlar yodlab bo'lingan!" else "Bugungi faol so'zlar tugadi"
+                                "MASTERED" -> if (selectedMasteredDateOffset == 999) "Hali yodlangan so'zlar yo'q" else "Ushbu kunda yodlangan so'zlar topilmadi"
+                                else -> "Sandiqda so'zlar topilmadi"
+                            },
                             color = theme.textPrimary,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
+                            fontSize = 15.sp,
+                            textAlign = TextAlign.Center
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Hujjat yuklash orqali barcha so'zlarni CEFR (A1–C2) darajalari bilan avtomatik qo'shing.",
+                            text = if (selectedViewMode == "TODAY")
+                                "Yangi so'zlar qo'shish uchun quyidagi 'Yana yodlash' tugmasini bosing."
+                            else
+                                "Yuqoridagi 'Yuklash' tugmasi orqali yangi so'zlar yuklang.",
                             color = theme.textSecondary,
                             fontSize = 12.sp,
                             textAlign = TextAlign.Center
                         )
+                        if (selectedViewMode == "TODAY" && unmasteredCards.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Button(
+                                onClick = onAddMoreDailyWords,
+                                colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.testTag("btn_empty_add_more_daily_words")
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("➕ Yana yodlash (+$dailyGoal)", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        } else if (selectedViewMode != "MASTERED") {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Button(
+                                onClick = { showUploadModal = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(Icons.Default.CloudUpload, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("So'zlar yuklash", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
             }
         } else {
-            items(filteredCards, key = { it.id }) { card ->
+            items(activeDisplayCards, key = { it.id }) { card ->
                 CefrVocabCardItem(
                     card = card,
                     onDelete = { onDeleteWord(card.id) },
@@ -584,15 +671,262 @@ fun VocabScreen(
             }
         }
 
+        // 6. ACTION PANEL AT BOTTOM OF TODAY LIST
+        if (selectedViewMode == "TODAY") {
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp, bottom = 10.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+                    border = BorderStroke(1.dp, theme.glassBorderSubtle)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = if (todayCards.isEmpty()) "🎉 Bugungi barcha so'zlar yodlandi!" else "💡 Bugungi qolgan so'zlar: ${todayCards.size} ta",
+                            color = theme.textPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = if (todayCards.isEmpty())
+                                "Ajoyib natija! Yana yangi so'zlarni hoziroq o'rganishni istasangiz:"
+                            else
+                                "Qolgan so'zlar bilan birga navbatdagi so'zlarni ham qo'shib yodlash:",
+                            color = theme.textSecondary,
+                            fontSize = 11.5.sp,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = onAddMoreDailyWords,
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
+                                modifier = Modifier
+                                    .weight(1.3f)
+                                    .testTag("btn_bottom_add_more_daily_words")
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("➕ Yana yodlash (+$dailyGoal)", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = {
+                                    showQuizDialog = true
+                                    onGenerateQuiz(quizFailedWordIds.isNotEmpty())
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = theme.glassSurface),
+                                border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.5f)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("btn_bottom_quiz")
+                            ) {
+                                Icon(Icons.Default.Psychology, contentDescription = null, tint = theme.primaryAccent, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (quizFailedWordIds.isNotEmpty()) "Qayta sinov" else "Sinov",
+                                    color = theme.textPrimary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
         item {
             Spacer(modifier = Modifier.height(30.dp))
         }
     }
 
-    // Modal Dialog: Single Word Add (AI-powered) - Uses SOLID OPAQUE dialogSurface
-    if (showAddDialog) {
+    // ==========================================
+    // MINI-WINDOW: YUKLASH OYNACHASI (Upload Dialog)
+    // ==========================================
+    if (showUploadModal) {
         AlertDialog(
-            onDismissRequest = { showAddDialog = false },
+            onDismissRequest = { showUploadModal = false },
+            containerColor = theme.dialogSurface,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Inventory2, contentDescription = null, tint = theme.primaryAccent)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "📥 Sandiqqa so'zlar yuklash",
+                        color = theme.textPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Serif
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "PDF, DOCX yoki matn faylini yuklang. So'zlar A1–C1 darajalariga ajratilib sandiqqa joylanadi.",
+                        color = theme.textSecondary,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // File Tap / Drop Card
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                docPickerLauncher.launch(
+                                    arrayOf(
+                                        "application/pdf",
+                                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                        "application/msword",
+                                        "text/plain",
+                                        "*/*"
+                                    )
+                                )
+                            }
+                            .testTag("btn_modal_file_picker"),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+                        border = BorderStroke(1.5.dp, theme.primaryAccent.copy(alpha = 0.6f))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(18.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(theme.primaryAccent.copy(alpha = 0.15f))
+                                    .border(1.dp, theme.primaryAccent.copy(alpha = 0.4f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isDocumentParsing) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(24.dp),
+                                        color = theme.primaryAccent,
+                                        strokeWidth = 2.5.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.CloudUpload,
+                                        contentDescription = "Fayl yuklash",
+                                        tint = theme.primaryAccent,
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Text(
+                                text = if (isDocumentParsing) "Hujjat o'rganilmoqda..." else "Faylni tanlash uchun bosing",
+                                color = theme.textPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            Text(
+                                text = if (isDocumentParsing) documentStatus.ifBlank { "So'zlar tahlil qilinmoqda..." } else "PDF, DOCX, TXT formatlar qo'llab-quvvatlanadi",
+                                color = theme.textSecondary,
+                                fontSize = 11.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Secondary Quick-Options
+                    OutlinedButton(
+                        onClick = {
+                            onLoadSampleCefr()
+                            showUploadModal = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.4f)),
+                        colors = ButtonDefaults.outlinedButtonColors(containerColor = theme.glassSurface)
+                    ) {
+                        Icon(Icons.Default.School, contentDescription = null, tint = theme.primaryAccent, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Oksford 3000™ (1500+ so'z) to'plamini sandiqqa yuklash", color = theme.textPrimary, fontSize = 11.5.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                showUploadModal = false
+                                showManualTextDialog = true
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, theme.glassBorderSubtle),
+                            colors = ButtonDefaults.outlinedButtonColors(containerColor = theme.glassSurface)
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = null, tint = theme.textSecondary, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Matn qo'yish", color = theme.textSecondary, fontSize = 11.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                showUploadModal = false
+                                showAddSingleDialog = true
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, theme.glassBorderSubtle),
+                            colors = ButtonDefaults.outlinedButtonColors(containerColor = theme.glassSurface)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, tint = theme.primaryAccent, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Yagona so'z", color = theme.textPrimary, fontSize = 11.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showUploadModal = false }) {
+                    Text("Yopish", color = theme.primaryAccent, fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+
+    // Modal Dialog: Single Word Add (AI-powered)
+    if (showAddSingleDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddSingleDialog = false },
             containerColor = theme.dialogSurface,
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -610,8 +944,8 @@ fun VocabScreen(
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     OutlinedTextField(
-                        value = wordInput,
-                        onValueChange = { wordInput = it },
+                        value = singleWordInput,
+                        onValueChange = { singleWordInput = it },
                         placeholder = { Text("Masalan: Diligent", color = theme.textSecondary) },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -630,7 +964,7 @@ fun VocabScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             CircularProgressIndicator(color = theme.primaryAccent, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Gemini tahlil qilmoqda...", color = theme.primaryAccent, fontSize = 12.sp)
+                            Text("Tahlil qilinmoqda...", color = theme.primaryAccent, fontSize = 12.sp)
                         }
                     }
                 }
@@ -638,28 +972,28 @@ fun VocabScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        if (wordInput.isNotBlank()) {
-                            onAddWordWithAi(wordInput.trim())
-                            wordInput = ""
-                            showAddDialog = false
+                        if (singleWordInput.isNotBlank()) {
+                            onAddWordWithAi(singleWordInput.trim())
+                            singleWordInput = ""
+                            showAddSingleDialog = false
                         }
                     },
-                    enabled = wordInput.isNotBlank() && !isLoading,
+                    enabled = singleWordInput.isNotBlank() && !isLoading,
                     colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("AI bilan qo'shish", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Sandiqqa qo'shish", color = Color.Black, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showAddDialog = false }) {
+                TextButton(onClick = { showAddSingleDialog = false }) {
                     Text("Bekor qilish", color = theme.textSecondary)
                 }
             }
         )
     }
 
-    // Modal Dialog: Raw Text Paste (Multiple words) - Uses SOLID OPAQUE dialogSurface
+    // Modal Dialog: Raw Text Paste
     if (showManualTextDialog) {
         AlertDialog(
             onDismissRequest = { showManualTextDialog = false },
@@ -670,7 +1004,7 @@ fun VocabScreen(
             text = {
                 Column {
                     Text(
-                        text = "So'zlar ro'yxatini yoki CEFR darajali matnni joylashtiring (masalan: 'can A1 qila olmoq', 'diligent B2 tirishqoq').",
+                        text = "So'zlar ro'yxatini yoki CEFR darajali matnni joylashtiring (masalan: 'abandon v. B2', 'ability n. A2').",
                         color = theme.textSecondary,
                         fontSize = 12.sp
                     )
@@ -678,7 +1012,7 @@ fun VocabScreen(
                     OutlinedTextField(
                         value = manualTextInput,
                         onValueChange = { manualTextInput = it },
-                        placeholder = { Text("can A1\ndiligent B2\nperseverance C1", color = theme.textSecondary) },
+                        placeholder = { Text("abandon v. B2\nability n. A2\nperseverance n. C1", color = theme.textSecondary) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(140.dp),
@@ -696,7 +1030,7 @@ fun VocabScreen(
                 Button(
                     onClick = {
                         if (manualTextInput.isNotBlank()) {
-                            onImportText(manualTextInput.trim(), manualDocTitle)
+                            onImportText(manualTextInput.trim(), "Qo'lda kiritilgan")
                             manualTextInput = ""
                             showManualTextDialog = false
                         }
@@ -705,7 +1039,7 @@ fun VocabScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Saralash & Qo'shish", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Sandiqqa qo'shish", color = Color.Black, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -716,11 +1050,14 @@ fun VocabScreen(
         )
     }
 
-    // Modal Dialog: AI Quiz - Uses SOLID OPAQUE dialogSurface
+    // SINOV MODAL DIALOGI
     if (showQuizDialog) {
         AiQuizDialog(
             questions = quizQuestions,
             isLoading = isQuizLoading,
+            onCompleteQuiz = { correctIds, failedIds ->
+                onSubmitQuizResults(correctIds, failedIds)
+            },
             onDismiss = {
                 showQuizDialog = false
                 onCloseQuiz()
@@ -785,13 +1122,25 @@ fun CefrVocabCardItem(
                     Spacer(modifier = Modifier.width(10.dp))
 
                     Column {
-                        Text(
-                            text = card.word,
-                            color = theme.textPrimary,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Serif
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = card.word,
+                                color = theme.textPrimary,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Serif
+                            )
+                            if (card.partOfSpeech.isNotBlank()) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = card.partOfSpeech,
+                                    color = theme.textSecondary,
+                                    fontSize = 11.5.sp,
+                                    fontStyle = FontStyle.Italic
+                                )
+                            }
+                        }
+
                         if (card.phonetic.isNotBlank()) {
                             Text(
                                 text = card.phonetic,
@@ -840,24 +1189,44 @@ fun CefrVocabCardItem(
                 fontWeight = FontWeight.SemiBold
             )
 
-            // Expanded extra details
+            // Example English sentence
+            if (card.example.isNotBlank()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Misol: \"${card.example}\"",
+                    color = theme.textPrimary.copy(alpha = 0.9f),
+                    fontSize = 12.sp,
+                    fontStyle = FontStyle.Italic
+                )
+            }
+
+            // Uzbek Translation of the example sentence
+            if (card.exampleTranslation.isNotBlank()) {
+                Spacer(modifier = Modifier.height(3.dp))
+                Text(
+                    text = "Tarjimasi: ${card.exampleTranslation}",
+                    color = theme.textSecondary,
+                    fontSize = 11.5.sp
+                )
+            }
+
+            // Expanded details: Synonym, Definition, Action
             AnimatedVisibility(visible = isExpanded) {
                 Column(modifier = Modifier.padding(top = 10.dp)) {
-                    if (card.definition.isNotBlank()) {
+                    if (card.synonym.isNotBlank()) {
                         Text(
-                            text = "Ta'rif: ${card.definition}",
+                            text = "Sinonim: ${card.synonym}",
                             color = theme.textSecondary,
                             fontSize = 12.sp
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                     }
 
-                    if (card.example.isNotBlank()) {
+                    if (card.definition.isNotBlank()) {
                         Text(
-                            text = "Misol: \"${card.example}\"",
-                            color = theme.textPrimary.copy(alpha = 0.85f),
-                            fontSize = 12.sp,
-                            fontStyle = FontStyle.Italic
+                            text = "Ta'rif: ${card.definition}",
+                            color = theme.textSecondary,
+                            fontSize = 12.sp
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                     }
@@ -872,7 +1241,6 @@ fun CefrVocabCardItem(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Action buttons: Mastered vs Repeat
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -897,7 +1265,7 @@ fun CefrVocabCardItem(
                             ) {
                                 Icon(Icons.Default.Check, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Yodlandi deb belgilash", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.5.sp)
+                                Text("✅ Yodlandi deb belgilash", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.5.sp)
                             }
                         }
                     }
@@ -911,6 +1279,7 @@ fun CefrVocabCardItem(
 fun AiQuizDialog(
     questions: List<QuizQuestion>,
     isLoading: Boolean,
+    onCompleteQuiz: (correctCardIds: List<String>, failedCardIds: List<String>) -> Unit,
     onDismiss: () -> Unit
 ) {
     val theme = LocalLiquidTheme.current
@@ -919,78 +1288,125 @@ fun AiQuizDialog(
     var score by remember { mutableIntStateOf(0) }
     var isAnswerSubmitted by remember { mutableStateOf(false) }
 
-    // SOLID OPAQUE DIALOG CONTAINER
+    val correctCardIds = remember { mutableStateListOf<String>() }
+    val failedCardIds = remember { mutableStateListOf<String>() }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = theme.dialogSurface,
         title = {
-            Text("🧠 Gemini AI Lug'at Quiz", color = theme.primaryAccent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text("🧠 Lug'at Sinovi", color = theme.primaryAccent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         },
         text = {
             if (isLoading) {
-                Box(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(180.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = theme.primaryAccent)
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text("Lug'atingiz asosida savollar tuzilmoqda...", color = theme.textSecondary, fontSize = 12.sp)
-                    }
-                }
-            } else if (questions.isEmpty()) {
-                Text("Savollar yuklanmadi. Lug'atingizga bir nechta so'z qo'shing va qayta urinib ko'ring.", color = theme.textSecondary, fontSize = 13.sp)
-            } else if (currentIndex >= questions.size) {
-                // Completed
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
+                        .padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text("🎉 Test yakunlandi!", color = theme.primaryAccent, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Natijangiz: $score / ${questions.size}", color = theme.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    CircularProgressIndicator(color = theme.primaryAccent)
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Text("Sinov savollari tayyorlanmoqda...", color = theme.textSecondary, fontSize = 12.sp)
+                }
+            } else if (questions.isEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("⚠️ Sinov uchun so'zlar topilmadi.", color = theme.textSecondary, fontSize = 12.sp, textAlign = TextAlign.Center)
+                }
+            } else if (currentIndex >= questions.size) {
+                // Results screen
+                val total = questions.size
+                val percent = if (total > 0) (score * 100) / total else 0
+                val isPassed = percent >= 90
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(if (isPassed) "🎉" else "📝", fontSize = 38.sp)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        if (score >= 4) "Ajoyib natija! Intizomingiz tahsinga loyiq." else "Yaxshi urinish! Qaytadan takrorlab chiqing.",
-                        color = theme.textSecondary,
-                        fontSize = 12.sp,
+                        text = if (isPassed) "Tabriklaymiz! Sinov topshirildi!" else "Sinov yakunlandi",
+                        color = theme.textPrimary,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center
                     )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Surface(
+                        color = if (isPassed) Color(0xFF4CAF50).copy(alpha = 0.2f) else Color(0xFFFF9800).copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, if (isPassed) Color(0xFF4CAF50) else Color(0xFFFF9800)),
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "Natija: $score / $total ($percent%)",
+                            color = if (isPassed) Color(0xFF4CAF50) else Color(0xFFFF9800),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    if (isPassed) {
+                        Text(
+                            text = "✅ 90% dan yuqori natija ko'rsatdingiz! Barcha to'g'ri topilgan so'zlar yodlanganlar safiga o'tkazildi va sandiqdan tozalandi. Bugungi sinov to'liq yakunlandi (Ertaga yangi sinov ochiladi).",
+                            color = theme.textSecondary,
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center
+                        )
+                    } else {
+                        Text(
+                            text = "⚠️ Talab: kamida 90% to'g'ri bo'lishi kerak.\nTo'g'ri topilgan ${correctCardIds.size} ta so'z yodlanganlar safiga o'tdi va sandiqdan tozalandi. Topa olmagan ${failedCardIds.size} ta so'zni esa 'Qayta yechish' orqali topshirishingiz mumkin.",
+                            color = theme.textSecondary,
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center
+                        )
+                    }
                 }
             } else {
                 val q = questions[currentIndex]
-                Column {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        text = "Savol ${currentIndex + 1}/${questions.size}:",
-                        color = theme.primaryAccent,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
+                        text = "Savol ${currentIndex + 1} / ${questions.size}",
+                        color = theme.textSecondary,
+                        fontSize = 11.5.sp
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = q.question,
                         color = theme.textPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     q.options.forEachIndexed { optIndex, optionText ->
-                        val isSelected = selectedOption == optIndex
                         val isCorrect = optIndex == q.correctIndex
-                        val btnBg = when {
-                            !isAnswerSubmitted && isSelected -> theme.primaryAccent.copy(alpha = 0.2f)
-                            isAnswerSubmitted && isCorrect -> Color(0xFF2E7D32).copy(alpha = 0.3f)
-                            isAnswerSubmitted && isSelected && !isCorrect -> Color(0xFFC62828).copy(alpha = 0.3f)
-                            else -> theme.glassSurface
-                        }
-                        val borderColor = when {
-                            isAnswerSubmitted && isCorrect -> Color(0xFF4CAF50)
-                            isAnswerSubmitted && isSelected && !isCorrect -> Color(0xFFEF5350)
-                            isSelected -> theme.primaryAccent
+                        val isUserChoice = optIndex == selectedOption
+
+                        val optBorderColor = when {
+                            !isAnswerSubmitted -> if (isUserChoice) theme.primaryAccent else theme.glassBorderSubtleColor
+                            isCorrect -> Color(0xFF4CAF50)
+                            isUserChoice -> Color(0xFFE53935)
                             else -> theme.glassBorderSubtleColor
+                        }
+
+                        val optBgColor = when {
+                            !isAnswerSubmitted -> if (isUserChoice) theme.primaryAccent.copy(alpha = 0.15f) else theme.glassSurface
+                            isCorrect -> Color(0xFF4CAF50).copy(alpha = 0.18f)
+                            isUserChoice -> Color(0xFFE53935).copy(alpha = 0.18f)
+                            else -> theme.glassSurface
                         }
 
                         Box(
@@ -998,8 +1414,8 @@ fun AiQuizDialog(
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(btnBg)
-                                .border(1.dp, borderColor, RoundedCornerShape(12.dp))
+                                .background(optBgColor)
+                                .border(1.dp, optBorderColor, RoundedCornerShape(12.dp))
                                 .clickable(enabled = !isAnswerSubmitted) {
                                     selectedOption = optIndex
                                 }
@@ -1008,16 +1424,17 @@ fun AiQuizDialog(
                             Text(
                                 text = optionText,
                                 color = theme.textPrimary,
-                                fontSize = 13.sp
+                                fontSize = 13.sp,
+                                fontWeight = if (isUserChoice) FontWeight.Bold else FontWeight.Normal
                             )
                         }
                     }
 
                     if (isAnswerSubmitted && q.explanation.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
                         Text(
-                            text = "Izoh: ${q.explanation}",
-                            color = theme.primaryAccent,
+                            text = q.explanation,
+                            color = theme.textSecondary,
                             fontSize = 11.5.sp
                         )
                     }
@@ -1025,51 +1442,62 @@ fun AiQuizDialog(
             }
         },
         confirmButton = {
-            if (!isLoading && questions.isNotEmpty()) {
-                if (currentIndex < questions.size) {
-                    if (!isAnswerSubmitted) {
-                        Button(
-                            onClick = {
-                                if (selectedOption != -1) {
-                                    isAnswerSubmitted = true
-                                    if (selectedOption == questions[currentIndex].correctIndex) {
-                                        score++
+            if (questions.isNotEmpty() && currentIndex < questions.size) {
+                if (!isAnswerSubmitted) {
+                    Button(
+                        onClick = {
+                            if (selectedOption != -1) {
+                                isAnswerSubmitted = true
+                                val currentQ = questions[currentIndex]
+                                if (selectedOption == currentQ.correctIndex) {
+                                    score++
+                                    if (currentQ.cardId.isNotBlank() && !correctCardIds.contains(currentQ.cardId)) {
+                                        correctCardIds.add(currentQ.cardId)
+                                    }
+                                } else {
+                                    if (currentQ.cardId.isNotBlank() && !failedCardIds.contains(currentQ.cardId)) {
+                                        failedCardIds.add(currentQ.cardId)
                                     }
                                 }
-                            },
-                            enabled = selectedOption != -1,
-                            colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("Javobni tekshirish", color = Color.Black, fontWeight = FontWeight.Bold)
-                        }
-                    } else {
-                        Button(
-                            onClick = {
-                                currentIndex++
-                                selectedOption = -1
-                                isAnswerSubmitted = false
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text(if (currentIndex + 1 < questions.size) "Keyingi savol" else "Natijani ko'rish", color = Color.Black, fontWeight = FontWeight.Bold)
-                        }
+                            }
+                        },
+                        enabled = selectedOption != -1,
+                        colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Tekshirish", color = Color.Black, fontWeight = FontWeight.Bold)
                     }
                 } else {
                     Button(
-                        onClick = onDismiss,
+                        onClick = {
+                            currentIndex++
+                            selectedOption = -1
+                            isAnswerSubmitted = false
+                        },
                         colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(10.dp)
                     ) {
-                        Text("Tugatish", color = Color.Black, fontWeight = FontWeight.Bold)
+                        Text("Keyingisi", color = Color.Black, fontWeight = FontWeight.Bold)
                     }
+                }
+            } else {
+                Button(
+                    onClick = {
+                        onCompleteQuiz(correctCardIds.toList(), failedCardIds.toList())
+                        onDismiss()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Natijani saqlash va tugatish", color = Color.Black, fontWeight = FontWeight.Bold)
                 }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Yopish", color = theme.textSecondary)
+            if (currentIndex < questions.size) {
+                TextButton(onClick = onDismiss) {
+                    Text("Bekor qilish", color = theme.textSecondary)
+                }
             }
         }
     )

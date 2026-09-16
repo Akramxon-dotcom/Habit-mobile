@@ -1,5 +1,6 @@
 package com.example.ui.screen
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -54,6 +55,7 @@ fun TelegramReportSection(
     statusMessage: String,
     onSaveSettings: (String, String) -> Unit,
     onSendReport: () -> Unit,
+    onTestConnection: (String, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     var tokenInput by remember(botToken) { mutableStateOf(botToken) }
@@ -161,22 +163,35 @@ fun TelegramReportSection(
                 }
 
                 Button(
+                    onClick = { onTestConnection(tokenInput.trim(), chatIdInput.trim()) },
+                    enabled = !isSending,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = HabitGold.copy(alpha = 0.25f)),
+                    border = BorderStroke(1.dp, HabitGold),
+                    modifier = Modifier
+                        .weight(1.2f)
+                        .testTag("btn_test_telegram")
+                ) {
+                    Text("🤖 Botni sinash", color = HabitGold, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
+
+                Button(
                     onClick = onSendReport,
                     enabled = !isSending,
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = HabitBlue),
                     modifier = Modifier
-                        .weight(1.5f)
+                        .weight(1.4f)
                         .testTag("btn_send_telegram_report")
                 ) {
                     if (isSending) {
                         CircularProgressIndicator(color = Color.White, modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Yuborilmoqda...", fontSize = 12.sp)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("...", fontSize = 12.sp)
                     } else {
-                        Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Hisobotni yuborish", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Hisobot", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

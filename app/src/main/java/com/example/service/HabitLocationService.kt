@@ -180,9 +180,9 @@ class HabitLocationService : Service() {
     private fun startLocationTracking() {
         if (locationCallback != null) return
 
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, 30_000L)
-            .setMinUpdateIntervalMillis(15_000L)
-            .setMinUpdateDistanceMeters(15f)
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10_000L)
+            .setMinUpdateIntervalMillis(5_000L)
+            .setMinUpdateDistanceMeters(0f)
             .build()
 
         locationCallback = object : LocationCallback() {
@@ -214,13 +214,59 @@ class HabitLocationService : Service() {
 
         _lastDetectedLocation.value = String.format(Locale.US, "%.5f, %.5f", currentLat, currentLng)
 
-        // 1. Automatic School Muting & Phone Vibrate Mode Management
+        // 1. Automatic School Muting & Maktab Task Completion
         checkSchoolGeofence(currentLat, currentLng)
 
         val radius = prefs.radiusMeters
         val distanceResults = FloatArray(1)
 
-        // 2. Check all custom locations configured by user
+        // 2. Check RTM Geofence
+        val rtmLoc = prefs.getCustomLocations().firstOrNull {
+            it.isEnabled && (it.id == "rtm" || it.name.contains("rtm", ignoreCase = true))
+        }
+        val rtmTargetLat = rtmLoc?.lat ?: prefs.rtmLat
+        val rtmTargetLng = rtmLoc?.lng ?: prefs.rtmLng
+        val rtmEffectiveRadius = (rtmLoc?.radiusMeters ?: radius).coerceAtLeast(120f)
+
+        Location.distanceBetween(currentLat, currentLng, rtmTargetLat, rtmTargetLng, distanceResults)
+        val distanceToRtm = distanceResults[0]
+        if (distanceToRtm <= rtmEffectiveRadius) {
+            Log.d(TAG, "💼 RTM hududiga kirildi! Masofa: ${distanceToRtm.toInt()} m")
+            // Mark both RTM commute and RTM task as completed
+            prefs.markTaskCompletedByTitleOrId(null, "RTMga yo'l")
+            prefs.markTaskCompletedByTitleOrId(null, "RTM ga yo'l")
+            prefs.markTaskCompletedByTitleOrId(null, "RTM")
+            if (rtmLoc != null && rtmLoc.targetHabitTitle.isNotBlank()) {
+                prefs.markTaskCompletedByTitleOrId(null, rtmLoc.targetHabitTitle)
+            }
+            com.example.service.HabitNotificationHelper.showActiveTaskNotification(applicationContext)
+
+            val key = "last_arrival_rtm"
+            val lastTime = prefs.getLong(key, 0L)
+            if ((nowMs - lastTime) >= HabitPreferences.COOLDOWN_MS) {
+                prefs.putLong(key, nowMs)
+                updateNotificationText("💼 RTM ga kelindi! Vazifa bajarildi deb belgilandi ($isoTimestamp)")
+                _lastDetectedLocation.value = "RTM (Masofa: ${distanceToRtm.toInt()}m)"
+
+                serviceScope.launch {
+                    FirestoreClient.patchArrival("RTM", isoTimestamp)
+                }
+
+                val botToken = prefs.telegramBotToken
+                val chatId = prefs.telegramChatId
+                if (botToken.isNotBlank() && chatId.isNotBlank()) {
+                    serviceScope.launch {
+                        com.example.data.remote.TelegramClient.sendReport(
+                            botToken,
+                            chatId,
+                            "💼 <b>RTM ga yetib kelindi!</b>\n\nJoylashuv: ${distanceToRtm.toInt()}m masofada aniqlandi.\nRTM vazifasi muvaffaqiyatli bajarildi deb belgilandi! 🎯"
+                        )
+                    }
+                }
+            }
+        }
+
+        // 3. Check all custom locations configured by user
         val customLocations = prefs.getCustomLocations().filter { it.isEnabled }
         for (loc in customLocations) {
             Location.distanceBetween(currentLat, currentLng, loc.lat, loc.lng, distanceResults)
@@ -242,6 +288,7 @@ class HabitLocationService : Service() {
 
                     // If configured to trigger task or wallpaper
                     if (loc.targetHabitTitle.isNotBlank()) {
+                        prefs.markTaskCompletedByTitleOrId(null, loc.targetHabitTitle)
                         com.example.service.HabitNotificationHelper.showActiveTaskNotification(applicationContext)
                         if (prefs.isAiWallpaperEnabled) {
                             serviceScope.launch {
@@ -256,7 +303,7 @@ class HabitLocationService : Service() {
 
     /**
      * Detects entering or exiting the School (Maktab) perimeter:
-     * - When entering: Automatically silences all alarm sounds, turns on phone vibrate mode, and terminates active alarms.
+     * - When entering: Automatically marks "Maktabga yo'l" completed, silences all alarm sounds, turns on phone vibrate mode, and terminates active alarms.
      * - When exiting: Automatically re-enables sound and restores previous phone ringer mode.
      */
     private fun checkSchoolGeofence(currentLat: Double, currentLng: Double) {
@@ -266,7 +313,7 @@ class HabitLocationService : Service() {
         }
         val targetLat = schoolLoc?.lat ?: prefs.maktabLat
         val targetLng = schoolLoc?.lng ?: prefs.maktabLng
-        val effectiveRadius = (schoolLoc?.radiusMeters ?: prefs.radiusMeters).coerceAtLeast(60f)
+        val effectiveRadius = (schoolLoc?.radiusMeters ?: prefs.radiusMeters).coerceAtLeast(120f)
 
         Location.distanceBetween(currentLat, currentLng, targetLat, targetLng, distanceResults)
         val distanceToSchool = distanceResults[0]
@@ -275,6 +322,15 @@ class HabitLocationService : Service() {
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
 
         if (isInsideSchool) {
+            // Automatically complete commute task "Maktabga yo'l" and school tasks
+            prefs.markTaskCompletedByTitleOrId(null, "Maktabga yo'l")
+            prefs.markTaskCompletedByTitleOrId(null, "Maktab ga yo'l")
+            prefs.markTaskCompletedByTitleOrId(null, "Maktab")
+            if (schoolLoc != null && schoolLoc.targetHabitTitle.isNotBlank()) {
+                prefs.markTaskCompletedByTitleOrId(null, schoolLoc.targetHabitTitle)
+            }
+            com.example.service.HabitNotificationHelper.showActiveTaskNotification(applicationContext)
+
             if (!prefs.isAtSchool) {
                 // User entered School grounds
                 Log.d(TAG, "🏫 Maktab hududiga kirildi (masofa: ${distanceToSchool.toInt()}m). Ovozlar o'chirildi va tebranish yoqildi.")
@@ -299,7 +355,19 @@ class HabitLocationService : Service() {
                     Log.w(TAG, "Telefonni vibrate rejimiga o'tkazishda cheklov: ${e.message}")
                 }
 
-                updateNotificationText("🏫 Maktabdasiz: Ovozlar o'chirildi, tebranish rejimi faol (${distanceToSchool.toInt()}m)")
+                updateNotificationText("🏫 Maktabdasiz: 'Maktabga yo'l' bajarildi, tebranish rejimi faol (${distanceToSchool.toInt()}m)")
+
+                val botToken = prefs.telegramBotToken
+                val chatId = prefs.telegramChatId
+                if (botToken.isNotBlank() && chatId.isNotBlank()) {
+                    serviceScope.launch {
+                        com.example.data.remote.TelegramClient.sendReport(
+                            botToken,
+                            chatId,
+                            "🏫 <b>Maktabga yetib kelindi!</b>\n\n'Maktabga yo'l' vazifasi muvaffaqiyatli bajarildi deb belgilandi.\nOvozlar o'chirildi va tebranish rejimi yoqildi."
+                        )
+                    }
+                }
             }
         } else {
             if (prefs.isAtSchool) {

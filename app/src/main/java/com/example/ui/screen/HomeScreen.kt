@@ -2,6 +2,7 @@ package com.example.ui.screen
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -74,9 +75,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -88,6 +91,9 @@ import com.example.data.model.ScheduleItem
 import com.example.data.model.TaskStatus
 import com.example.data.model.TaskTimeEngine
 import com.example.ui.HabitUiState
+import com.example.ui.screen.MonthlyEnglishPlanHomeCard
+import com.example.ui.screen.MonthlyEnglishPlanDialog
+import com.example.ui.theme.DesignArchetype
 import com.example.ui.theme.HabitBg
 import com.example.ui.theme.HabitBlue
 import com.example.ui.theme.HabitBlueGlow
@@ -138,7 +144,8 @@ fun HomeScreen(
     onAddWordWithAi: (String) -> Unit = {},
     onDeleteVocabCard: (String) -> Unit = {},
     onUpdateVocabBoxLevel: (String, Int) -> Unit = { _, _ -> },
-    onGenerateQuiz: () -> Unit = {},
+    onGenerateQuiz: (retryOnly: Boolean) -> Unit = {},
+    onSubmitQuizResults: (List<String>, List<String>) -> Unit = { _, _ -> },
     onCloseQuiz: () -> Unit = {},
     onSaveDailyJournal: (Int, String, String, String) -> Unit = { _, _, _, _ -> },
     onUnlockApp: () -> Unit = {},
@@ -164,11 +171,16 @@ fun HomeScreen(
     onSetAlarmSoundTone: (String) -> Unit = {},
     onPlayTestAlarmSound: () -> Unit = {},
     onSetDailyVocabGoal: (Int) -> Unit = {},
+    onAddMoreDailyWords: () -> Unit = {},
     onImportVocabDocument: (android.net.Uri, String) -> Unit = { _, _ -> },
     onImportVocabText: (String, String) -> Unit = { _, _ -> },
     onLoadSampleCefrVocab: () -> Unit = {},
     onMarkVocabMastered: (String) -> Unit = {},
-    onResetVocabForReview: (String) -> Unit = {}
+    onResetVocabForReview: (String) -> Unit = {},
+    onTestTelegramConnection: (String, String) -> Unit = { _, _ -> },
+    onSelectEnglishPlanWeek: (Int) -> Unit = {},
+    onToggleEnglishPlanTask: (String) -> Unit = {},
+    onSetEnglishPlanModalOpen: (Boolean) -> Unit = {}
 ) {
     var showAddTaskDialog by remember { mutableStateOf(false) }
     var showDelayDialog by remember { mutableStateOf(false) }
@@ -303,6 +315,25 @@ fun HomeScreen(
                             onDelayClick = { showDelayDialog = true },
                             onEditClick = { showEditTaskDialog = true }
                         )
+                    }
+
+                    // 2b. Modern Habit Design Archetype Selector (Switch between 6 fundamentally distinct styles)
+                    item {
+                        LiquidThemeSelectorBar(
+                            selectedThemeId = state.selectedThemeId,
+                            onSelectTheme = onSelectTheme
+                        )
+                    }
+
+                    // 2c. 1 Oylik Ingliz Tili Rejasi (A2) Home Preview Card
+                    item {
+                        Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) {
+                            MonthlyEnglishPlanHomeCard(
+                                activeWeek = state.activeEnglishPlanWeek,
+                                completedTaskIds = state.completedEnglishPlanTaskIds,
+                                onOpenFullPlan = { onSetEnglishPlanModalOpen(true) }
+                            )
+                        }
                     }
 
                     // 3. Late Escalation Bar / Urgent Focus Card (if user is running late)
@@ -502,11 +533,13 @@ fun HomeScreen(
                 VocabScreen(
                     cards = state.vocabCards,
                     isLoading = state.isVocabLoading,
+                    todayBatchCardIds = state.todayVocabCardIds,
                     dailyGoal = state.dailyVocabGoal,
                     learnedToday = state.vocabLearnedTodayCount,
                     isDocumentParsing = state.isVocabDocumentParsing,
                     documentStatus = state.vocabDocumentStatus,
                     onSetDailyGoal = onSetDailyVocabGoal,
+                    onAddMoreDailyWords = onAddMoreDailyWords,
                     onImportDocument = onImportVocabDocument,
                     onImportText = onImportVocabText,
                     onLoadSampleCefr = onLoadSampleCefrVocab,
@@ -519,7 +552,14 @@ fun HomeScreen(
                     onGenerateQuiz = onGenerateQuiz,
                     quizQuestions = state.quizQuestions,
                     isQuizLoading = state.isQuizLoading,
+                    isQuizPassedToday = state.isQuizPassedToday,
+                    quizFailedWordIds = state.quizFailedWordIds,
+                    onSubmitQuizResults = onSubmitQuizResults,
                     onCloseQuiz = onCloseQuiz,
+                    activeEnglishPlanWeek = state.activeEnglishPlanWeek,
+                    completedEnglishPlanTaskIds = state.completedEnglishPlanTaskIds,
+                    onSelectEnglishPlanWeek = onSelectEnglishPlanWeek,
+                    onToggleEnglishPlanTask = onToggleEnglishPlanTask,
                     modifier = Modifier.padding(innerPadding)
                 )
             }
@@ -577,6 +617,7 @@ fun HomeScreen(
                     onApplyAiWallpaperNow = onApplyAiWallpaperNow,
                     onSaveTelegramSettings = onSaveTelegramSettings,
                     onSendTelegramReport = onSendTelegramReport,
+                    onTestTelegramConnection = onTestTelegramConnection,
                     onToggleBlockerPaused = onToggleBlockerPaused,
                     onOpenAppPicker = onOpenAppPicker,
                     onToggleAppBlocked = onToggleAppBlocked,
@@ -616,6 +657,16 @@ fun HomeScreen(
                 onAddCustomLocation(name, lat, lng, rad, act, habit)
             },
             onDismiss = { showCustomLocationDialog = false }
+        )
+    }
+
+    if (state.isEnglishPlanModalOpen) {
+        MonthlyEnglishPlanDialog(
+            activeWeek = state.activeEnglishPlanWeek,
+            completedTaskIds = state.completedEnglishPlanTaskIds,
+            onSelectWeek = onSelectEnglishPlanWeek,
+            onToggleTask = onToggleEnglishPlanTask,
+            onDismiss = { onSetEnglishPlanModalOpen(false) }
         )
     }
 
@@ -1063,8 +1114,8 @@ fun HabitStreakBar(
             .fillMaxWidth()
             .padding(horizontal = 20.dp),
         colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, theme.glassBorderSubtle)
+        shape = theme.cardShape,
+        border = BorderStroke(theme.borderWidth, theme.glassBorderSubtle)
     ) {
         Row(
             modifier = Modifier
@@ -1072,7 +1123,15 @@ fun HabitStreakBar(
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("🔥", fontSize = 22.sp)
+            val streakIcon = when (theme.archetype) {
+                DesignArchetype.NEO_GLASS -> "🍏"
+                DesignArchetype.BENTO_BRUTALIST -> "🍱"
+                DesignArchetype.CYBERPUNK_HUD -> "⚡"
+                DesignArchetype.ZEN_ORGANIC -> "🌿"
+                DesignArchetype.SOLAR_FLAME -> "🔥"
+                DesignArchetype.OLED_MINIMAL -> "●"
+            }
+            Text(streakIcon, fontSize = 20.sp)
             Spacer(modifier = Modifier.width(10.dp))
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1081,12 +1140,13 @@ fun HabitStreakBar(
                         color = theme.primaryAccent,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Serif
+                        fontFamily = if (theme.archetype == DesignArchetype.BENTO_BRUTALIST || theme.archetype == DesignArchetype.CYBERPUNK_HUD) FontFamily.Monospace else FontFamily.Serif
                     )
                     Text(
                         text = "kunlik ketma-ketlik · $level",
                         color = theme.textSecondary,
-                        fontSize = 12.5.sp
+                        fontSize = 12.5.sp,
+                        fontFamily = if (theme.archetype == DesignArchetype.BENTO_BRUTALIST || theme.archetype == DesignArchetype.CYBERPUNK_HUD) FontFamily.Monospace else FontFamily.Default
                     )
                 }
             }
@@ -1095,7 +1155,8 @@ fun HabitStreakBar(
                 text = "Jamg'arma: $timeBankMinutes daq",
                 color = theme.accentTertiary,
                 fontSize = 11.5.sp,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = if (theme.archetype == DesignArchetype.BENTO_BRUTALIST || theme.archetype == DesignArchetype.CYBERPUNK_HUD) FontFamily.Monospace else FontFamily.Default
             )
         }
     }
@@ -1117,9 +1178,9 @@ fun HabitArcTrack(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(46.dp)
-                .clip(RoundedCornerShape(16.dp))
+                .clip(theme.cardShape)
                 .background(Brush.verticalGradient(listOf(theme.glassSurfaceElevated, theme.glassSurface)))
-                .border(BorderStroke(1.dp, theme.glassBorderSubtle), RoundedCornerShape(16.dp))
+                .border(BorderStroke(theme.borderWidth, theme.glassBorderSubtle), theme.cardShape)
         ) {
             // Filled portion with dynamic liquid glow
             Box(
@@ -1172,10 +1233,11 @@ fun HabitArcTrack(
                 .padding(horizontal = 4.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text("04:00", fontSize = 10.5.sp, color = HabitInkSoft)
-            Text("10:00", fontSize = 10.5.sp, color = HabitInkSoft)
-            Text("16:00", fontSize = 10.5.sp, color = HabitInkSoft)
-            Text("22:00", fontSize = 10.5.sp, color = HabitInkSoft)
+            val trackFontFamily = if (theme.archetype == DesignArchetype.BENTO_BRUTALIST || theme.archetype == DesignArchetype.CYBERPUNK_HUD) FontFamily.Monospace else FontFamily.Default
+            Text("04:00", fontSize = 10.5.sp, fontFamily = trackFontFamily, color = theme.textMuted)
+            Text("10:00", fontSize = 10.5.sp, fontFamily = trackFontFamily, color = theme.textMuted)
+            Text("16:00", fontSize = 10.5.sp, fontFamily = trackFontFamily, color = theme.textMuted)
+            Text("22:00", fontSize = 10.5.sp, fontFamily = trackFontFamily, color = theme.textMuted)
         }
     }
 }
@@ -1189,11 +1251,33 @@ fun HabitHeroCard(
     onEditClick: () -> Unit
 ) {
     val theme = LocalLiquidTheme.current
+    when (theme.archetype) {
+        DesignArchetype.NEO_GLASS -> NeoGlassHeroCard(state, onWhyClick, onDoneClick, onDelayClick, onEditClick)
+        DesignArchetype.BENTO_BRUTALIST -> BentoBrutalistHeroCard(state, onWhyClick, onDoneClick, onDelayClick, onEditClick)
+        DesignArchetype.CYBERPUNK_HUD -> CyberpunkHudHeroCard(state, onWhyClick, onDoneClick, onDelayClick, onEditClick)
+        DesignArchetype.ZEN_ORGANIC -> ZenOrganicHeroCard(state, onWhyClick, onDoneClick, onDelayClick, onEditClick)
+        DesignArchetype.SOLAR_FLAME -> SolarFlameHeroCard(state, onWhyClick, onDoneClick, onDelayClick, onEditClick)
+        DesignArchetype.OLED_MINIMAL -> OledMinimalHeroCard(state, onWhyClick, onDoneClick, onDelayClick, onEditClick)
+    }
+}
+
+// -------------------------------------------------------------
+// 1. NEO-GLASS HERO CARD (Apple Fitness Rings & iOS 18 Liquid)
+// -------------------------------------------------------------
+@Composable
+fun NeoGlassHeroCard(
+    state: HabitUiState,
+    onWhyClick: () -> Unit,
+    onDoneClick: () -> Unit,
+    onDelayClick: () -> Unit,
+    onEditClick: () -> Unit
+) {
+    val theme = LocalLiquidTheme.current
     val habit = state.habitState
     val taskInfo = state.realtimeTaskInfo
-
     val title = if (habit.title.isNotBlank()) habit.title else "Hozircha rejalashtirilgan vazifa yo'q"
     val time = if (habit.start.isNotBlank() && habit.end.isNotBlank()) "${habit.start}–${habit.end}" else "--:--"
+    val progress = (state.arcProgressPercent.toFloat() / 100f).coerceIn(0f, 1f)
 
     Card(
         modifier = Modifier
@@ -1201,23 +1285,22 @@ fun HabitHeroCard(
             .padding(horizontal = 20.dp, vertical = 6.dp)
             .testTag("hero_task_card"),
         colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
-        shape = RoundedCornerShape(24.dp),
-        border = if (taskInfo.status == TaskStatus.ACTIVE) BorderStroke(1.5.dp, theme.primaryAccent) else BorderStroke(1.dp, theme.glassBorderSubtle)
+        shape = theme.cardShape,
+        border = BorderStroke(theme.borderWidth, theme.glassBorder)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            theme.glassSurfaceElevated,
-                            theme.bgTop.copy(alpha = 0.85f)
-                        )
+                    Brush.radialGradient(
+                        colors = listOf(theme.glassSurfaceElevated, theme.bgTop.copy(alpha = 0.90f)),
+                        center = Offset(200f, 100f),
+                        radius = 800f
                     )
                 )
                 .padding(22.dp)
         ) {
-            // Top Row: Status badge and "Nega muhim?"
+            // Header: Status badge & concentric ring indicator
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1226,30 +1309,560 @@ fun HabitHeroCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
-                            .size(9.dp)
+                            .size(10.dp)
                             .clip(CircleShape)
-                            .background(if (taskInfo.status == TaskStatus.ACTIVE) theme.primaryAccent else theme.textSecondary)
+                            .background(theme.primaryAccent)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = taskInfo.statusLabel,
-                        fontSize = 12.5.sp,
+                        text = "🍏 APPLE FOCUS RING",
+                        fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold,
-                        color = theme.textPrimary
+                        color = theme.primaryAccent,
+                        letterSpacing = 0.5.sp
                     )
                 }
 
                 Surface(
                     onClick = onWhyClick,
                     shape = RoundedCornerShape(12.dp),
-                    color = theme.glassSurface,
+                    color = theme.glassSurfaceSoft,
                     border = BorderStroke(1.dp, theme.glassBorderSubtle)
                 ) {
                     Text(
                         text = "Nega muhim?",
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                        fontSize = 11.5.sp,
+                        fontSize = 11.sp,
                         color = theme.textPrimary
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Main row with Title + Circular Fitness Ring
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        fontSize = 21.sp,
+                        lineHeight = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Serif,
+                        color = theme.textPrimary
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Vaqt: $time · ${taskInfo.timeRemainingText}",
+                        fontSize = 13.sp,
+                        color = theme.textSecondary
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(14.dp))
+
+                // Apple Fitness 3D Concentric Ring Meter
+                Box(
+                    modifier = Modifier.size(72.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.size(72.dp)) {
+                        val strokeW = 6.dp.toPx()
+                        // Outer Ring: Time Arc
+                        drawCircle(
+                            color = theme.timelineTrackColor,
+                            style = Stroke(width = strokeW)
+                        )
+                        drawArc(
+                            brush = Brush.sweepGradient(listOf(theme.primaryAccent, theme.accentTertiary)),
+                            startAngle = -90f,
+                            sweepAngle = progress * 360f,
+                            useCenter = false,
+                            style = Stroke(width = strokeW, cap = StrokeCap.Round)
+                        )
+                        // Inner Ring: Accent secondary
+                        val innerStroke = 4.dp.toPx()
+                        drawArc(
+                            color = theme.accentSecondary.copy(alpha = 0.5f),
+                            startAngle = -90f,
+                            sweepAngle = ((progress * 1.3f).coerceIn(0f, 1f)) * 360f,
+                            useCenter = false,
+                            style = Stroke(width = innerStroke, cap = StrokeCap.Round)
+                        )
+                    }
+                    Text(
+                        text = "${(progress * 100).toInt()}%",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = theme.primaryAccent
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // Fluid iOS 18 Action Buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Button(
+                    onClick = onDoneClick,
+                    modifier = Modifier
+                        .weight(1.5f)
+                        .height(48.dp)
+                        .testTag("hero_done_button"),
+                    shape = theme.buttonShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent)
+                ) {
+                    Text("✅ Bajardim", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Button(
+                    onClick = onDelayClick,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .testTag("hero_delay_button"),
+                    shape = theme.buttonShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.glassSurface),
+                    border = BorderStroke(1.dp, theme.glassBorderSubtle)
+                ) {
+                    Text("⏱ Kechikdim", color = theme.textPrimary, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                }
+
+                IconButton(
+                    onClick = onEditClick,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .background(theme.glassSurface, theme.buttonShape)
+                        .border(1.dp, theme.glassBorderSubtle, theme.buttonShape)
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = "Tahrirlash", tint = theme.textPrimary, modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// 2. LINEAR BENTO GRID HERO CARD (Notion & Linear Pro)
+// -------------------------------------------------------------
+@Composable
+fun BentoBrutalistHeroCard(
+    state: HabitUiState,
+    onWhyClick: () -> Unit,
+    onDoneClick: () -> Unit,
+    onDelayClick: () -> Unit,
+    onEditClick: () -> Unit
+) {
+    val theme = LocalLiquidTheme.current
+    val habit = state.habitState
+    val taskInfo = state.realtimeTaskInfo
+    val title = if (habit.title.isNotBlank()) habit.title else "Vazifa belgilanmagan"
+    val time = if (habit.start.isNotBlank() && habit.end.isNotBlank()) "${habit.start} - ${habit.end}" else "--:--"
+    val progress = (state.arcProgressPercent.toFloat() / 100f).coerceIn(0f, 1f)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 6.dp)
+            .testTag("hero_task_card")
+    ) {
+        // Bento 2x2 Header Matrix
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Bento Box Left: Current Operation (60% width)
+            Card(
+                modifier = Modifier.weight(1.5f),
+                colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+                shape = theme.cardShape,
+                border = BorderStroke(theme.borderWidth, theme.glassBorder)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "[ CURRENT_OP ]",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = theme.primaryAccent
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .background(theme.primaryAccent, CircleShape)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = title,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = theme.textPrimary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = time,
+                        fontSize = 11.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = theme.textSecondary
+                    )
+                }
+            }
+
+            // Bento Box Right: Remaining Timer & Metrics (40% width)
+            Card(
+                modifier = Modifier.weight(1f),
+                colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+                shape = theme.cardShape,
+                border = BorderStroke(theme.borderWidth, theme.glassBorder)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "[ REMAINING ]",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = theme.accentTertiary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = taskInfo.timeRemainingText.ifBlank { "00:00" },
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = theme.primaryAccent
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "${(progress * 100).toInt()}% bajarildi",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = theme.textSecondary
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Bento Status & Progress Bar Box
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+            shape = theme.cardShape,
+            border = BorderStroke(theme.borderWidth, theme.glassBorder)
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                // Segmented Bento Progress Line
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "PROGRESS: [${(progress * 10).toInt()}/10 BLOCKS]",
+                        fontSize = 10.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = theme.textSecondary
+                    )
+                    Text(
+                        text = if (habit.blocking) "🛡️ BLOCKED" else "🔓 OPEN",
+                        fontSize = 10.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (habit.blocking) theme.primaryAccent else theme.textSecondary
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(4.dp)),
+                    color = theme.primaryAccent,
+                    trackColor = theme.timelineTrackColor
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Bento Action Row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = onDoneClick,
+                modifier = Modifier
+                    .weight(1.5f)
+                    .height(46.dp)
+                    .testTag("hero_done_button"),
+                shape = theme.buttonShape,
+                colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent)
+            ) {
+                Text("[✓] EXECUTE (BAJARDIM)", color = Color.Black, fontSize = 12.5.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+            }
+
+            Button(
+                onClick = onDelayClick,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(46.dp)
+                    .testTag("hero_delay_button"),
+                shape = theme.buttonShape,
+                colors = ButtonDefaults.buttonColors(containerColor = theme.glassSurface),
+                border = BorderStroke(1.dp, theme.glassBorderSubtle)
+            ) {
+                Text("[+] KECHIKDIM", color = theme.textPrimary, fontSize = 11.5.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+            }
+
+            IconButton(
+                onClick = onEditClick,
+                modifier = Modifier
+                    .size(46.dp)
+                    .background(theme.glassSurface, theme.buttonShape)
+                    .border(1.dp, theme.glassBorderSubtle, theme.buttonShape)
+            ) {
+                Icon(Icons.Default.Edit, contentDescription = "Tahrirlash", tint = theme.textPrimary, modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// 3. CYBERPUNK HUD HERO CARD (Sci-Fi Matrix Console)
+// -------------------------------------------------------------
+@Composable
+fun CyberpunkHudHeroCard(
+    state: HabitUiState,
+    onWhyClick: () -> Unit,
+    onDoneClick: () -> Unit,
+    onDelayClick: () -> Unit,
+    onEditClick: () -> Unit
+) {
+    val theme = LocalLiquidTheme.current
+    val habit = state.habitState
+    val taskInfo = state.realtimeTaskInfo
+    val title = if (habit.title.isNotBlank()) habit.title else "TERMINAL_STANDBY"
+    val time = if (habit.start.isNotBlank() && habit.end.isNotBlank()) "${habit.start} >> ${habit.end}" else "--:--"
+    val progress = (state.arcProgressPercent.toFloat() / 100f).coerceIn(0f, 1f)
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 6.dp)
+            .testTag("hero_task_card"),
+        colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+        shape = theme.cardShape,
+        border = BorderStroke(theme.borderWidth, theme.glassBorder)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(theme.glassSurfaceElevated, Color(0xFF020904))
+                    )
+                )
+                .padding(20.dp)
+        ) {
+            // Cyberpunk HUD Bar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "> SYSTEM // TASK_ENGAGED",
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = theme.primaryAccent
+                )
+                Text(
+                    text = "SYS_SEC: ARMORED",
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = theme.accentTertiary
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Task Title
+            Text(
+                text = title,
+                fontSize = 20.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                color = theme.textPrimary
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Time & Remaining in Matrix style
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "T_WINDOW: $time",
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = theme.textSecondary
+                )
+                Text(
+                    text = "REM: ${taskInfo.timeRemainingText}",
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = theme.primaryAccent
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Matrix Console Progress Bar
+            val totalBlocks = 18
+            val filledBlocks = (progress * totalBlocks).toInt().coerceIn(0, totalBlocks)
+            val matrixBar = buildString {
+                append("<")
+                repeat(filledBlocks) { append("=") }
+                repeat(totalBlocks - filledBlocks) { append("-") }
+                append("> ${(progress * 100).toInt()}%")
+            }
+            Text(
+                text = matrixBar,
+                fontSize = 11.5.sp,
+                fontFamily = FontFamily.Monospace,
+                color = theme.accentTertiary
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Cyberpunk Actions
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onDoneClick,
+                    modifier = Modifier
+                        .weight(1.5f)
+                        .height(46.dp)
+                        .testTag("hero_done_button"),
+                    shape = theme.buttonShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent)
+                ) {
+                    Text("[▶] BAJARDIM", color = Color.Black, fontSize = 13.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                }
+
+                Button(
+                    onClick = onDelayClick,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp)
+                        .testTag("hero_delay_button"),
+                    shape = theme.buttonShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.glassSurface),
+                    border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.5f))
+                ) {
+                    Text("[||] SURISH", color = theme.primaryAccent, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                }
+
+                IconButton(
+                    onClick = onEditClick,
+                    modifier = Modifier
+                        .size(46.dp)
+                        .background(theme.glassSurface, theme.buttonShape)
+                        .border(1.dp, theme.primaryAccent.copy(alpha = 0.5f), theme.buttonShape)
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = "Tahrirlash", tint = theme.primaryAccent, modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// 4. ZEN BOTANICAL HERO CARD (Fabulous & Headspace Calm Mind)
+// -------------------------------------------------------------
+@Composable
+fun ZenOrganicHeroCard(
+    state: HabitUiState,
+    onWhyClick: () -> Unit,
+    onDoneClick: () -> Unit,
+    onDelayClick: () -> Unit,
+    onEditClick: () -> Unit
+) {
+    val theme = LocalLiquidTheme.current
+    val habit = state.habitState
+    val taskInfo = state.realtimeTaskInfo
+    val title = if (habit.title.isNotBlank()) habit.title else "Tinchlik va xotirjamlik"
+    val time = if (habit.start.isNotBlank() && habit.end.isNotBlank()) "${habit.start} — ${habit.end}" else "--:--"
+    val progress = (state.arcProgressPercent.toFloat() / 100f).coerceIn(0f, 1f)
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 6.dp)
+            .testTag("hero_task_card"),
+        colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+        shape = theme.cardShape,
+        border = BorderStroke(theme.borderWidth, theme.glassBorderSubtle)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(theme.glassSurfaceElevated, theme.bgTop)
+                    )
+                )
+                .padding(24.dp)
+        ) {
+            // Calm Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🌿", fontSize = 16.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Diqqat va xotirjamlik",
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = theme.primaryAccent
+                    )
+                }
+
+                Surface(
+                    onClick = onWhyClick,
+                    shape = CircleShape,
+                    color = theme.glassSurfaceSoft
+                ) {
+                    Text(
+                        text = "Nega muhim?",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        fontSize = 11.5.sp,
+                        color = theme.textSecondary
                     )
                 }
             }
@@ -1260,37 +1873,36 @@ fun HabitHeroCard(
             Text(
                 text = title,
                 fontSize = 22.sp,
-                lineHeight = 29.sp,
-                fontWeight = FontWeight.Bold,
+                lineHeight = 30.sp,
+                fontWeight = FontWeight.SemiBold,
                 fontFamily = FontFamily.Serif,
                 color = theme.textPrimary
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
-            // Time and Countdown
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = time,
-                    fontSize = 14.sp,
-                    color = theme.textSecondary
-                )
+            Text(
+                text = "Shoshilmasdan, ammo to'xtamasdan bajaring · $time",
+                fontSize = 12.5.sp,
+                color = theme.textSecondary
+            )
 
-                Text(
-                    text = taskInfo.timeRemainingText,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (taskInfo.status == TaskStatus.ACTIVE) theme.primaryAccent else theme.textSecondary
-                )
-            }
+            Spacer(modifier = Modifier.height(14.dp))
 
-            Spacer(modifier = Modifier.height(18.dp))
+            // Smooth Serene Wave Progress
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(CircleShape),
+                color = theme.primaryAccent,
+                trackColor = theme.timelineTrackColor
+            )
 
-            // Action Buttons
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Soft Pill Action Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -1298,44 +1910,32 @@ fun HabitHeroCard(
                 Button(
                     onClick = onDoneClick,
                     modifier = Modifier
-                        .weight(1.6f)
-                        .height(50.dp)
+                        .weight(1.5f)
+                        .height(48.dp)
                         .testTag("hero_done_button"),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = theme.buttonShape,
                     colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent)
                 ) {
-                    Text(
-                        text = "✅ Bajardim",
-                        color = Color.Black,
-                        fontSize = 14.5.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text("✅ Bajarildi", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
 
                 Button(
                     onClick = onDelayClick,
                     modifier = Modifier
                         .weight(1f)
-                        .height(50.dp)
+                        .height(48.dp)
                         .testTag("hero_delay_button"),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = theme.glassSurface),
-                    border = BorderStroke(1.dp, theme.glassBorderSubtle)
+                    shape = theme.buttonShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.glassSurfaceSoft)
                 ) {
-                    Text(
-                        text = "⏱ Kechikdim",
-                        color = theme.textPrimary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    Text("⏱ Qoldirish", color = theme.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 }
 
                 IconButton(
                     onClick = onEditClick,
                     modifier = Modifier
-                        .size(50.dp)
-                        .background(theme.glassSurface, RoundedCornerShape(16.dp))
-                        .border(1.dp, theme.glassBorderSubtle, RoundedCornerShape(16.dp))
+                        .size(48.dp)
+                        .background(theme.glassSurfaceSoft, CircleShape)
                 ) {
                     Icon(Icons.Default.Edit, contentDescription = "Tahrirlash", tint = theme.textPrimary, modifier = Modifier.size(18.dp))
                 }
@@ -1344,8 +1944,311 @@ fun HabitHeroCard(
     }
 }
 
+// -------------------------------------------------------------
+// 5. SOLAR FLAME HERO CARD (Streaks & High-Energy Athlete)
+// -------------------------------------------------------------
+@Composable
+fun SolarFlameHeroCard(
+    state: HabitUiState,
+    onWhyClick: () -> Unit,
+    onDoneClick: () -> Unit,
+    onDelayClick: () -> Unit,
+    onEditClick: () -> Unit
+) {
+    val theme = LocalLiquidTheme.current
+    val habit = state.habitState
+    val taskInfo = state.realtimeTaskInfo
+    val title = if (habit.title.isNotBlank()) habit.title else "Vazifaga kirishish"
+    val time = if (habit.start.isNotBlank() && habit.end.isNotBlank()) "${habit.start} — ${habit.end}" else "--:--"
+    val progress = (state.arcProgressPercent.toFloat() / 100f).coerceIn(0f, 1f)
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 6.dp)
+            .testTag("hero_task_card"),
+        colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+        shape = theme.cardShape,
+        border = BorderStroke(theme.borderWidth, theme.glassBorder)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(theme.glassSurfaceElevated, Color(0xFF2C0B05))
+                    )
+                )
+                .padding(22.dp)
+        ) {
+            // High Energy Streak Tag
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🔥", fontSize = 18.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "INTIZOM VA OLOVLI ENERGIYA",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black,
+                        color = theme.primaryAccent,
+                        letterSpacing = 0.5.sp
+                    )
+                }
+
+                Surface(
+                    onClick = onWhyClick,
+                    shape = RoundedCornerShape(8.dp),
+                    color = theme.primaryAccent.copy(alpha = 0.18f),
+                    border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.4f))
+                ) {
+                    Text(
+                        text = "Nega muhim?",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = theme.primaryAccent
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Bold Task Title
+            Text(
+                text = title,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Black,
+                color = theme.textPrimary
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Time & Motivation
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Vaqt: $time",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = theme.accentTertiary
+                )
+                Text(
+                    text = "Qoldi: ${taskInfo.timeRemainingText}",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = theme.primaryAccent
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Dynamic Flame Progress
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(4.dp)),
+                color = theme.primaryAccent,
+                trackColor = theme.timelineTrackColor
+            )
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // High-Energy Buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Button(
+                    onClick = onDoneClick,
+                    modifier = Modifier
+                        .weight(1.5f)
+                        .height(50.dp)
+                        .testTag("hero_done_button"),
+                    shape = theme.buttonShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent)
+                ) {
+                    Text("🔥 BAJARDIM!", color = Color.White, fontSize = 14.5.sp, fontWeight = FontWeight.Black)
+                }
+
+                Button(
+                    onClick = onDelayClick,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(50.dp)
+                        .testTag("hero_delay_button"),
+                    shape = theme.buttonShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.glassSurface),
+                    border = BorderStroke(1.dp, theme.glassBorderSubtle)
+                ) {
+                    Text("⏱ Surish", color = theme.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+
+                IconButton(
+                    onClick = onEditClick,
+                    modifier = Modifier
+                        .size(50.dp)
+                        .background(theme.glassSurface, theme.buttonShape)
+                        .border(1.dp, theme.glassBorderSubtle, theme.buttonShape)
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = "Tahrirlash", tint = theme.textPrimary, modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// 6. NOTHING OS MINIMAL HERO CARD (Stealth OLED & Dot Matrix)
+// -------------------------------------------------------------
+@Composable
+fun OledMinimalHeroCard(
+    state: HabitUiState,
+    onWhyClick: () -> Unit,
+    onDoneClick: () -> Unit,
+    onDelayClick: () -> Unit,
+    onEditClick: () -> Unit
+) {
+    val theme = LocalLiquidTheme.current
+    val habit = state.habitState
+    val taskInfo = state.realtimeTaskInfo
+    val title = if (habit.title.isNotBlank()) habit.title else "Idle State"
+    val time = if (habit.start.isNotBlank() && habit.end.isNotBlank()) "${habit.start} - ${habit.end}" else "--:--"
+    val progress = (state.arcProgressPercent.toFloat() / 100f).coerceIn(0f, 1f)
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 6.dp)
+            .testTag("hero_task_card"),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0D0D0D)),
+        shape = theme.cardShape,
+        border = BorderStroke(theme.borderWidth, Color(0xFF2E2E2E))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+        ) {
+            // Nothing OS Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "● NOTHING OS // FOCUS",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+
+                Text(
+                    text = if (habit.blocking) "ARMORED" else "UNLOCKED",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Normal,
+                    color = Color(0xFF888888)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Clean Minimal Title
+            Text(
+                text = title,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.White
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = "$time   |   ${taskInfo.timeRemainingText}",
+                fontSize = 12.5.sp,
+                color = Color(0xFFA0A0A0)
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Dot Matrix Progress: 10 dots
+            val totalDots = 10
+            val activeDots = (progress * totalDots).toInt().coerceIn(0, totalDots)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                for (i in 0 until totalDots) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(4.dp)
+                            .background(
+                                if (i < activeDots) Color.White else Color(0xFF2A2A2A),
+                                RoundedCornerShape(2.dp)
+                            )
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // Monochromatic Buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onDoneClick,
+                    modifier = Modifier
+                        .weight(1.5f)
+                        .height(44.dp)
+                        .testTag("hero_done_button"),
+                    shape = theme.buttonShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.White)
+                ) {
+                    Text("Bajardim", color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Button(
+                    onClick = onDelayClick,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                        .testTag("hero_delay_button"),
+                    shape = theme.buttonShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1C1C1C)),
+                    border = BorderStroke(0.8.dp, Color(0xFF383838))
+                ) {
+                    Text("Kechikdim", color = Color.White, fontSize = 12.sp)
+                }
+
+                IconButton(
+                    onClick = onEditClick,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(Color(0xFF1C1C1C), theme.buttonShape)
+                        .border(0.8.dp, Color(0xFF383838), theme.buttonShape)
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = "Tahrirlash", tint = Color.White, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+    }
+}
+
+
 @Composable
 fun HabitProgressBar(progressPercent: Int) {
+    val theme = LocalLiquidTheme.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1355,8 +2258,19 @@ fun HabitProgressBar(progressPercent: Int) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text("Bugungi progress", fontSize = 12.sp, color = HabitInkSoft)
-            Text("$progressPercent%", fontSize = 12.sp, color = HabitGold, fontWeight = FontWeight.Bold)
+            Text(
+                text = if (theme.archetype == DesignArchetype.CYBERPUNK_HUD) "> PROGRESS_METER" else if (theme.archetype == DesignArchetype.BENTO_BRUTALIST) "DAILY PROGRESS" else "Bugungi progress",
+                fontSize = 12.sp,
+                fontFamily = if (theme.archetype == DesignArchetype.BENTO_BRUTALIST || theme.archetype == DesignArchetype.CYBERPUNK_HUD) FontFamily.Monospace else FontFamily.Default,
+                color = theme.textSecondary
+            )
+            Text(
+                text = "$progressPercent%",
+                fontSize = 12.sp,
+                color = theme.primaryAccent,
+                fontFamily = if (theme.archetype == DesignArchetype.BENTO_BRUTALIST || theme.archetype == DesignArchetype.CYBERPUNK_HUD) FontFamily.Monospace else FontFamily.Default,
+                fontWeight = FontWeight.Bold
+            )
         }
         Spacer(modifier = Modifier.height(6.dp))
         LinearProgressIndicator(
@@ -1364,9 +2278,9 @@ fun HabitProgressBar(progressPercent: Int) {
             modifier = Modifier
                 .fillMaxWidth()
                 .height(6.dp)
-                .clip(RoundedCornerShape(4.dp)),
-            color = HabitGold,
-            trackColor = HabitCardBg,
+                .clip(theme.badgeShape),
+            color = theme.primaryAccent,
+            trackColor = theme.timelineTrackColor,
             strokeCap = StrokeCap.Round
         )
     }
@@ -1377,6 +2291,7 @@ fun HabitDayTabs(
     selectedOffset: Int,
     onSelectOffset: (Int) -> Unit
 ) {
+    val theme = LocalLiquidTheme.current
     val labels = listOf(
         -3 to "3 kun oldin",
         -2 to "Kecha o'tgan",
@@ -1397,16 +2312,17 @@ fun HabitDayTabs(
             val isSelected = offset == selectedOffset
             Surface(
                 onClick = { onSelectOffset(offset) },
-                shape = RoundedCornerShape(999.dp),
-                color = if (isSelected) HabitGold else Color.Transparent,
-                border = BorderStroke(1.dp, if (isSelected) HabitGold else HabitLine)
+                shape = theme.badgeShape,
+                color = if (isSelected) theme.primaryAccent else theme.glassSurfaceSoft,
+                border = BorderStroke(theme.borderWidth, if (isSelected) theme.primaryAccent else theme.glassBorderSubtleColor)
             ) {
                 Text(
                     text = label,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
                     fontSize = 12.5.sp,
+                    fontFamily = if (theme.archetype == DesignArchetype.BENTO_BRUTALIST || theme.archetype == DesignArchetype.CYBERPUNK_HUD) FontFamily.Monospace else FontFamily.Default,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                    color = if (isSelected) Color(0xFF241C08) else HabitInkSoft
+                    color = if (isSelected) Color.Black else theme.textSecondary
                 )
             }
         }
@@ -1415,6 +2331,7 @@ fun HabitDayTabs(
 
 @Composable
 fun HabitSegmentHeader(segmentName: String) {
+    val theme = LocalLiquidTheme.current
     val icon = when (segmentName) {
         "Tong" -> "🌅"
         "Kunduz" -> "☀️"
@@ -1434,13 +2351,13 @@ fun HabitSegmentHeader(segmentName: String) {
         Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = segmentName,
-            color = HabitInkSoft,
+            color = theme.textSecondary,
             fontSize = 14.sp,
             fontWeight = FontWeight.SemiBold,
-            fontFamily = FontFamily.Serif
+            fontFamily = if (theme.archetype == DesignArchetype.BENTO_BRUTALIST || theme.archetype == DesignArchetype.CYBERPUNK_HUD) FontFamily.Monospace else FontFamily.Serif
         )
         Spacer(modifier = Modifier.width(12.dp))
-        HorizontalDivider(modifier = Modifier.weight(1f), color = HabitLine, thickness = 1.dp)
+        HorizontalDivider(modifier = Modifier.weight(1f), color = theme.glassBorderSubtleColor, thickness = 1.dp)
     }
 }
 
@@ -1510,9 +2427,9 @@ fun HabitTimelineRow(
             colors = CardDefaults.cardColors(
                 containerColor = if (isCurrent) theme.glassSurfaceElevated else theme.glassSurface
             ),
-            shape = RoundedCornerShape(18.dp),
+            shape = theme.cardShape,
             border = BorderStroke(
-                1.dp,
+                theme.borderWidth,
                 if (isCurrent) theme.primaryAccent else theme.glassBorderSubtleColor
             )
         ) {
@@ -1529,16 +2446,25 @@ fun HabitTimelineRow(
                     Text(
                         text = "${item.start}–${item.end} · ${item.getCategoryLabel()}",
                         fontSize = 11.5.sp,
+                        fontFamily = if (theme.archetype == DesignArchetype.BENTO_BRUTALIST || theme.archetype == DesignArchetype.CYBERPUNK_HUD) FontFamily.Monospace else FontFamily.Default,
                         color = theme.textSecondary
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         if (isCurrent) {
                             Surface(
-                                shape = RoundedCornerShape(999.dp),
-                                color = theme.primaryAccent.copy(alpha = 0.25f)
+                                shape = theme.badgeShape,
+                                color = theme.primaryAccent.copy(alpha = 0.25f),
+                                border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.5f))
                             ) {
-                                Text("Ayni vaqtda", modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp), fontSize = 10.sp, color = theme.primaryAccent, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = if (theme.archetype == DesignArchetype.CYBERPUNK_HUD) "ACTIVE" else if (theme.archetype == DesignArchetype.BENTO_BRUTALIST) "CURRENT" else "Ayni vaqtda",
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                    fontSize = 10.sp,
+                                    fontFamily = if (theme.archetype == DesignArchetype.BENTO_BRUTALIST || theme.archetype == DesignArchetype.CYBERPUNK_HUD) FontFamily.Monospace else FontFamily.Default,
+                                    color = theme.primaryAccent,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
                         if (item.blocking) {
@@ -1553,7 +2479,7 @@ fun HabitTimelineRow(
                     text = item.title,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
-                    fontFamily = FontFamily.Serif,
+                    fontFamily = if (theme.archetype == DesignArchetype.BENTO_BRUTALIST || theme.archetype == DesignArchetype.CYBERPUNK_HUD) FontFamily.Monospace else if (theme.archetype == DesignArchetype.ZEN_ORGANIC) FontFamily.Serif else FontFamily.Default,
                     color = theme.textPrimary,
                     lineHeight = 20.sp
                 )
@@ -1733,6 +2659,7 @@ fun TizimGpsTab(
     onApplyAiWallpaperNow: () -> Unit = {},
     onSaveTelegramSettings: (String, String) -> Unit = { _, _ -> },
     onSendTelegramReport: () -> Unit = {},
+    onTestTelegramConnection: (String, String) -> Unit = { _, _ -> },
     onToggleBlockerPaused: (Boolean) -> Unit = {},
     onOpenAppPicker: () -> Unit = {},
     onToggleAppBlocked: (String, Boolean) -> Unit = { _, _ -> },
@@ -2526,7 +3453,8 @@ fun TizimGpsTab(
                     isSending = state.isTelegramSending,
                     statusMessage = state.telegramStatusMessage,
                     onSaveSettings = onSaveTelegramSettings,
-                    onSendReport = onSendTelegramReport
+                    onSendReport = onSendTelegramReport,
+                    onTestConnection = onTestTelegramConnection
                 )
             }
         }

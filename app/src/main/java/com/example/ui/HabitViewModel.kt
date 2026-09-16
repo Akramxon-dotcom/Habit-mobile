@@ -95,9 +95,13 @@ data class HabitUiState(
 
     // Vocab & Quiz
     val vocabCards: List<com.example.data.model.VocabCard> = emptyList(),
+    val todayVocabCardIds: List<String> = emptyList(),
     val isVocabLoading: Boolean = false,
     val quizQuestions: List<com.example.data.model.QuizQuestion> = emptyList(),
     val isQuizLoading: Boolean = false,
+    val isQuizPassedToday: Boolean = false,
+    val quizFailedWordIds: Set<String> = emptySet(),
+    val isQuizRetryMode: Boolean = false,
 
     // Journal
     val journalEntries: List<com.example.data.model.JournalEntry> = emptyList(),
@@ -153,7 +157,12 @@ data class HabitUiState(
     val dailyVocabGoal: Int = 10,
     val vocabLearnedTodayCount: Int = 0,
     val isVocabDocumentParsing: Boolean = false,
-    val vocabDocumentStatus: String = ""
+    val vocabDocumentStatus: String = "",
+
+    // 1 Oylik Ingliz Tili Rejasi (A2)
+    val activeEnglishPlanWeek: Int = 1,
+    val completedEnglishPlanTaskIds: Set<String> = emptySet(),
+    val isEnglishPlanModalOpen: Boolean = false
 )
 
 class HabitViewModel(application: Application) : AndroidViewModel(application) {
@@ -182,6 +191,11 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             HabitLocationService.lastDetectedLocation.collect { loc ->
                 _uiState.update { it.copy(lastDetectedLocation = loc) }
+                // Immediately refresh schedule whenever location detects arrival
+                if (loc != null && (loc.contains("Maktab", ignoreCase = true) || loc.contains("RTM", ignoreCase = true))) {
+                    val freshSchedule = prefs.getSchedule()
+                    _uiState.update { it.copy(scheduleItems = freshSchedule) }
+                }
             }
         }
 
@@ -351,6 +365,7 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
                 telegramBotToken = prefs.telegramBotToken,
                 telegramChatId = prefs.telegramChatId,
                 vocabCards = prefs.getVocabCards(),
+                todayVocabCardIds = prefs.getTodayVocabBatchIds(),
                 journalEntries = prefs.getJournalEntries(),
                 selectedThemeId = prefs.getSelectedTheme(),
                 customLocations = prefs.getCustomLocations(),
@@ -362,10 +377,15 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
                 alarmVolume = prefs.alarmVolume,
                 alarmSoundTone = prefs.alarmSoundTone,
                 dailyVocabGoal = prefs.dailyVocabGoal,
-                vocabLearnedTodayCount = prefs.vocabLearnedTodayCount
+                vocabLearnedTodayCount = prefs.vocabLearnedTodayCount,
+                isQuizPassedToday = prefs.isQuizPassedToday(),
+                quizFailedWordIds = prefs.getQuizFailedWordIds(),
+                activeEnglishPlanWeek = prefs.getActiveEnglishPlanWeek(),
+                completedEnglishPlanTaskIds = prefs.getCompletedEnglishPlanTaskIds()
             )
         }
         refreshWeather()
+        initOrRefreshTodayVocabBatch()
         // Update widget, notification and alarms on load
         com.example.widget.HabitAppWidgetProvider.updateAllWidgets(getApplication())
         com.example.service.HabitNotificationHelper.showActiveTaskNotification(getApplication())
@@ -390,12 +410,13 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(selectedDayOffset = offset) }
         val cal = Calendar.getInstance()
         cal.add(Calendar.DAY_OF_YEAR, offset)
-        val plan = when (cal.get(Calendar.DAY_OF_WEEK)) {
-            Calendar.SUNDAY -> TaskTimeEngine.SUNDAY_PLAN
-            Calendar.MONDAY, Calendar.WEDNESDAY, Calendar.FRIDAY -> TaskTimeEngine.LESSON_PLAN
-            else -> TaskTimeEngine.FREE_PLAN
+        val dayInfo = TaskTimeEngine.getTodayPlanInfo(cal)
+        _uiState.update {
+            it.copy(
+                scheduleItems = dayInfo.first,
+                dayTypeLabel = dayInfo.second
+            )
         }
-        _uiState.update { it.copy(scheduleItems = plan) }
     }
 
     fun markTaskCompleted(item: ScheduleItem) {
@@ -581,6 +602,16 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
             val result = FirestoreClient.getState()
             if (result.isSuccess) {
                 val state = result.getOrThrow()
+                val isSunday = Calendar.getInstance().get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY
+                val isSchoolTask = state.category.equals("school", ignoreCase = true) ||
+                                   state.category.equals("rtm", ignoreCase = true) ||
+                                   state.title.contains("Maktab", ignoreCase = true)
+
+                if (isSunday && isSchoolTask) {
+                    _uiState.update { it.copy(isLoading = false) }
+                    return@launch
+                }
+
                 prefs.saveCachedState(state)
                 val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
 
@@ -616,6 +647,15 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
             val result = FirestoreClient.getState()
             if (result.isSuccess) {
                 val state = result.getOrThrow()
+                val isSunday = Calendar.getInstance().get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY
+                val isSchoolTask = state.category.equals("school", ignoreCase = true) ||
+                                   state.category.equals("rtm", ignoreCase = true) ||
+                                   state.title.contains("Maktab", ignoreCase = true)
+
+                if (isSunday && isSchoolTask) {
+                    return@launch
+                }
+
                 prefs.saveCachedState(state)
                 val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
                 val taskInfo = TaskTimeEngine.calculateTaskInfo(state)
@@ -957,21 +997,63 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- Telegram Reporting ---
     fun saveTelegramSettings(token: String, chatId: String) {
-        prefs.telegramBotToken = token
-        prefs.telegramChatId = chatId
+        val cleanTok = token.trim().removePrefix("bot").trim()
+        val cleanChat = chatId.trim()
+        prefs.telegramBotToken = cleanTok
+        prefs.telegramChatId = cleanChat
         _uiState.update {
-            it.copy(telegramBotToken = token, telegramChatId = chatId)
+            it.copy(telegramBotToken = cleanTok, telegramChatId = cleanChat)
         }
         viewModelScope.launch { _userMessage.emit("Telegram sozlamalari saqlandi!") }
     }
 
-    fun sendTelegramReport() {
+    fun testTelegramConnection(token: String, chatId: String) {
         viewModelScope.launch {
-            val token = _uiState.value.telegramBotToken
-            val chatId = _uiState.value.telegramChatId
+            val cleanTok = token.trim().removePrefix("bot").trim()
+            val cleanChat = chatId.trim()
+            if (cleanTok.isBlank() || cleanChat.isBlank()) {
+                _userMessage.emit("Iltimos, Bot Token va Chat ID ni kiriting!")
+                return@launch
+            }
+            _uiState.update { it.copy(isTelegramSending = true, telegramStatusMessage = "Telegram bot tekshirilmoqda...") }
+            val res = com.example.data.remote.TelegramClient.testConnection(cleanTok, cleanChat)
+            if (res.isSuccess) {
+                prefs.telegramBotToken = cleanTok
+                prefs.telegramChatId = cleanChat
+                _uiState.update {
+                    it.copy(
+                        isTelegramSending = false,
+                        telegramBotToken = cleanTok,
+                        telegramChatId = cleanChat,
+                        telegramStatusMessage = "✅ Telegram bot muvaffaqiyatli ulandi va test xabari yuborildi!"
+                    )
+                }
+                _userMessage.emit("✅ Telegram bot bilan aloqa muvaffaqiyatli!")
+            } else {
+                val err = res.exceptionOrNull()?.message ?: "Xatolik yuz berdi"
+                _uiState.update {
+                    it.copy(
+                        isTelegramSending = false,
+                        telegramStatusMessage = "❌ $err"
+                    )
+                }
+                _userMessage.emit("❌ Telegram xatosi: $err")
+            }
+        }
+    }
+
+    fun sendTelegramReport(customToken: String? = null, customChatId: String? = null) {
+        viewModelScope.launch {
+            val token = (customToken?.trim()?.removePrefix("bot")?.trim() ?: _uiState.value.telegramBotToken).ifBlank { prefs.telegramBotToken }
+            val chatId = (customChatId?.trim() ?: _uiState.value.telegramChatId).ifBlank { prefs.telegramChatId }
             if (token.isBlank() || chatId.isBlank()) {
                 _userMessage.emit("Iltimos, Telegram Bot Token va Chat ID ni kiriting!")
                 return@launch
+            }
+            if (customToken != null || customChatId != null) {
+                prefs.telegramBotToken = token
+                prefs.telegramChatId = chatId
+                _uiState.update { it.copy(telegramBotToken = token, telegramChatId = chatId) }
             }
 
             _uiState.update { it.copy(isTelegramSending = true, telegramStatusMessage = "Yuborilmoqda...") }
@@ -1046,6 +1128,8 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
         if (isMuted) {
             val reason = if (prefs.isAtSchool || prefs.isSchoolMuted) {
                 "🏫 Maktab hududidasiz! Darsga xalaqit bermasligi uchun barcha tovushlar avtomatik o'chirilgan (telefon tebranishda)."
+            } else if (prefs.isPhoneInSilentOrVibrateMode()) {
+                "🔕 Telefoningiz ovozsiz yoki tebranish rejimida! Signal eshitilishi uchun telefon ovozini yoqing."
             } else {
                 "⚠️ Signal ovozsiz (Muted) holatda! Avval yuqoridagi karnay tugmasini bosing yoki sozlamalardan yoqing."
             }
@@ -1093,11 +1177,103 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- Vocab & Document Engine ---
     fun setDailyVocabGoal(goal: Int) {
-        val validGoal = goal.coerceAtLeast(10)
+        val validGoal = goal.coerceIn(5, 50)
         prefs.dailyVocabGoal = validGoal
         _uiState.update { it.copy(dailyVocabGoal = validGoal) }
+        initOrRefreshTodayVocabBatch()
         viewModelScope.launch {
-            _userMessage.emit("🎯 Kunlik me'yor: $validGoal ta so'z (kamida 10 ta)")
+            _userMessage.emit("🎯 Kunlik me'yor: $validGoal ta so'z belgilandi")
+        }
+    }
+
+    fun initOrRefreshTodayVocabBatch() {
+        val todayIso = TaskTimeEngine.getIsoDateForOffset(0)
+        val allCards = prefs.getVocabCards().toMutableList()
+        val dailyGoal = prefs.dailyVocabGoal.coerceIn(5, 50)
+
+        // Ensure legacy mastered cards have a learnedDate so they show in learned view
+        var needCardSave = false
+        val migratedCards = allCards.map { card ->
+            if (card.isMastered && card.learnedDate.isBlank()) {
+                needCardSave = true
+                card.copy(learnedDate = todayIso)
+            } else card
+        }
+        if (needCardSave) {
+            prefs.saveVocabCards(migratedCards)
+        }
+
+        val storedBatchDate = prefs.todayVocabBatchDate
+        val currentBatchIds = prefs.getTodayVocabBatchIds()
+
+        if (storedBatchDate != todayIso) {
+            // New Day:
+            // 1. Keep unmastered carryover words from previous batch
+            val carryoverIds = currentBatchIds.filter { id ->
+                migratedCards.find { it.id == id }?.isMastered == false
+            }
+            // 2. Select fresh unmastered words to meet the daily goal
+            val unmasteredPool = migratedCards.filter { !it.isMastered && it.id !in carryoverIds }
+            val newBatchCount = (dailyGoal - carryoverIds.size).coerceAtLeast(dailyGoal)
+            val newWords = unmasteredPool.take(newBatchCount)
+            val finalBatchIds = carryoverIds + newWords.map { it.id }
+
+            prefs.todayVocabBatchDate = todayIso
+            prefs.saveTodayVocabBatchIds(finalBatchIds)
+            _uiState.update {
+                it.copy(
+                    todayVocabCardIds = finalBatchIds,
+                    vocabCards = migratedCards,
+                    isQuizPassedToday = prefs.isQuizPassedToday(),
+                    quizFailedWordIds = prefs.getQuizFailedWordIds()
+                )
+            }
+        } else {
+            // Same Day:
+            // Filter out any card that has already been mastered!
+            val activeRemainingIds = currentBatchIds.filter { id ->
+                migratedCards.find { it.id == id }?.isMastered == false
+            }
+            // If empty at the very start of today and no words learned today yet, seed with dailyGoal
+            val finalBatchIds = if (activeRemainingIds.isEmpty() && !prefs.isQuizPassedToday() && prefs.vocabLearnedTodayCount == 0) {
+                val fresh = migratedCards.filter { !it.isMastered }.take(dailyGoal).map { it.id }
+                prefs.saveTodayVocabBatchIds(fresh)
+                fresh
+            } else {
+                prefs.saveTodayVocabBatchIds(activeRemainingIds)
+                activeRemainingIds
+            }
+
+            _uiState.update {
+                it.copy(
+                    todayVocabCardIds = finalBatchIds,
+                    vocabCards = migratedCards,
+                    isQuizPassedToday = prefs.isQuizPassedToday(),
+                    quizFailedWordIds = prefs.getQuizFailedWordIds()
+                )
+            }
+        }
+    }
+
+    fun addMoreDailyWords() {
+        viewModelScope.launch {
+            val allCards = prefs.getVocabCards()
+            val currentBatch = prefs.getTodayVocabBatchIds().filter { id ->
+                allCards.find { it.id == id }?.isMastered == false
+            }
+            val dailyGoal = prefs.dailyVocabGoal.coerceIn(5, 50)
+
+            val availableNewCards = allCards.filter { !it.isMastered && it.id !in currentBatch }
+            if (availableNewCards.isEmpty()) {
+                _userMessage.emit("Barcha 3000 ta lug'at so'zlari yodlangan yoki ro'yxatga kiritilgan! 🎉")
+                return@launch
+            }
+
+            val toAdd = availableNewCards.take(dailyGoal)
+            val updatedBatch = currentBatch + toAdd.map { it.id }
+            prefs.saveTodayVocabBatchIds(updatedBatch)
+            _uiState.update { it.copy(todayVocabCardIds = updatedBatch) }
+            _userMessage.emit("➕ Qo'shimcha ${toAdd.size} ta yangi so'z qo'shildi! Bugungi faol so'zlar: ${updatedBatch.size} ta.")
         }
     }
 
@@ -1126,10 +1302,10 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(
                     vocabCards = sorted,
                     isVocabDocumentParsing = false,
-                    vocabDocumentStatus = "${newCards.size} ta yangi so'z qo'shildi"
+                    vocabDocumentStatus = "${newCards.size} ta yangi so'z sandiqqa qo'shildi"
                 )
             }
-            _userMessage.emit("✅ '$fileName' hujjatidan ${newCards.size} ta so'z CEFR darajalari (A1-C2) bo'yicha saralandi!")
+            _userMessage.emit("📦 '$fileName' hujjatidan ${newCards.size} ta so'z sandiqqa qo'shildi! Kunlik me'yoringiz bo'yicha berib boriladi.")
         }
     }
 
@@ -1155,12 +1331,12 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
 
             prefs.saveVocabCards(sorted)
             _uiState.update { it.copy(vocabCards = sorted, isVocabDocumentParsing = false) }
-            _userMessage.emit("✅ ${newCards.size} ta so'z tartiblangan holda saqlandi!")
+            _userMessage.emit("📦 ${newCards.size} ta so'z sandiqqa joylandi!")
         }
     }
 
     fun loadSampleCefrVocabulary() {
-        val sample = com.example.data.util.VocabDocumentParser.getSampleCefrProgression()
+        val sample = com.example.data.util.Oxford3000Database.getAllOxfordCards(getApplication())
         val current = prefs.getVocabCards().toMutableList()
         val existingWords = current.map { it.word.lowercase() }.toSet()
         val newCards = sample.filter { !existingWords.contains(it.word.lowercase()) }
@@ -1174,7 +1350,11 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
         prefs.saveVocabCards(sorted)
         _uiState.update { it.copy(vocabCards = sorted) }
         viewModelScope.launch {
-            _userMessage.emit("📚 Oxford/CEFR (A1-B2) tayyor lug'atlar to'plami muvaffaqiyatli yuklandi!")
+            if (newCards.isEmpty()) {
+                _userMessage.emit("📦 Sandiq to'liq: barcha ${sorted.size} ta Oksford so'zlari joylangan!")
+            } else {
+                _userMessage.emit("📦 Oksford 3000™ (${newCards.size} ta yangi so'z) sandiqqa joylandi! Jami: ${sorted.size} ta")
+            }
         }
     }
 
@@ -1274,24 +1454,83 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun generateQuiz() {
+    fun generateQuiz(retryOnly: Boolean = false) {
         viewModelScope.launch {
             _uiState.update { it.copy(isQuizLoading = true, quizQuestions = emptyList()) }
-            val cards = prefs.getVocabCards()
-            if (cards.isEmpty()) {
+            val allCards = prefs.getVocabCards()
+            if (allCards.isEmpty()) {
                 _uiState.update { it.copy(isQuizLoading = false) }
+                _userMessage.emit("⚠️ Sinov uchun avval so'zlar yuklang")
                 return@launch
             }
 
-            val sampleWords = cards.shuffled().take(5)
+            if (!retryOnly && prefs.isQuizPassedToday()) {
+                _uiState.update { it.copy(isQuizLoading = false) }
+                _userMessage.emit("✅ Bugungi sinov muvaffaqiyatli topshirilgan (90%+). Yangi sinov ertaga ochiladi!")
+                return@launch
+            }
+
+            val targetCards: List<com.example.data.model.VocabCard>
+
+            if (retryOnly) {
+                val failedIds = prefs.getQuizFailedWordIds()
+                val filtered = allCards.filter { it.id in failedIds }
+                if (filtered.isEmpty()) {
+                    prefs.markQuizPassedToday()
+                    _uiState.update {
+                        it.copy(
+                            isQuizLoading = false,
+                            isQuizPassedToday = true,
+                            quizFailedWordIds = emptySet()
+                        )
+                    }
+                    _userMessage.emit("🎉 Barcha xatolar allaqachon to'g'rilangan!")
+                    return@launch
+                }
+                targetCards = filtered
+                _uiState.update { it.copy(isQuizRetryMode = true) }
+            } else {
+                val unmastered = allCards.filter { !it.isMastered }
+                val mastered = allCards.filter { it.isMastered }
+                val dailyGoal = prefs.dailyVocabGoal.coerceAtLeast(1)
+
+                // 1. Bugungi faol batch so'zlari
+                val batchIds = prefs.getTodayVocabBatchIds()
+                val todayWords = allCards.filter { it.id in batchIds && !it.isMastered }
+                    .ifEmpty { unmastered.take(dailyGoal) }
+
+                // 2. Takrorlash uchun 3 ta yodlangan so'zlaridan (agar yodlanganlar bo'lsa)
+                val reviewWords = if (mastered.isNotEmpty()) {
+                    mastered.shuffled().take(minOf(3, mastered.size))
+                } else {
+                    emptyList()
+                }
+
+                val pool = (todayWords + reviewWords).toMutableList()
+
+                if (pool.isEmpty()) {
+                    _uiState.update { it.copy(isQuizLoading = false) }
+                    _userMessage.emit("⚠️ Sinov uchun so'zlar topilmadi")
+                    return@launch
+                }
+                targetCards = pool
+                _uiState.update { it.copy(isQuizRetryMode = false) }
+            }
+
+            val sampleWords = targetCards.shuffled()
+
             val prompt = buildString {
-                append("Generate an interactive 5-question multiple choice vocabulary quiz in English & Uzbek based on these study words:\n")
-                sampleWords.forEach { append("- ${it.word}: ${it.translation} (${it.definition})\n") }
+                append("Generate an interactive multiple choice vocabulary quiz in English & Uzbek based on these study words:\n")
+                sampleWords.forEach { item ->
+                    val tag = if (item.isMastered) "Yodlangan (Takrorlash)" else "Bugungi so'z"
+                    append("- ID: ${item.id} | Word: ${item.word}: ${item.translation} (${item.definition}) [$tag]\n")
+                }
                 append("""
-                    Return ONLY a JSON array with exactly 5 objects matching this schema:
+                    Return ONLY a JSON array with exactly ${sampleWords.size} objects matching this schema:
                     [
                       {
-                        "question": "What is the meaning of ...?",
+                        "cardId": "...",
+                        "question": "What is the meaning of 'word'?",
                         "options": ["Option A", "Option B", "Option C", "Option D"],
                         "correctIndex": 0,
                         "explanation": "Short explanation in Uzbek"
@@ -1311,34 +1550,108 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
                         val qList = mutableListOf<com.example.data.model.QuizQuestion>()
                         for (i in 0 until jsonArr.length()) {
                             val obj = jsonArr.getJSONObject(i)
+                            val cId = obj.optString("cardId", if (i < sampleWords.size) sampleWords[i].id else "")
                             val qText = obj.getString("question")
                             val optsArr = obj.getJSONArray("options")
                             val opts = mutableListOf<String>()
                             for (j in 0 until optsArr.length()) opts.add(optsArr.getString(j))
                             val cIdx = obj.getInt("correctIndex")
                             val exp = obj.optString("explanation", "")
-                            qList.add(com.example.data.model.QuizQuestion(qText, opts, cIdx, exp))
+                            qList.add(com.example.data.model.QuizQuestion(cId, qText, opts, cIdx, exp))
                         }
-                        _uiState.update { it.copy(quizQuestions = qList, isQuizLoading = false) }
-                        return@launch
+                        if (qList.size == sampleWords.size) {
+                            _uiState.update { it.copy(quizQuestions = qList, isQuizLoading = false) }
+                            return@launch
+                        }
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
             }
 
-            // Fallback questions if offline or JSON parsing issue
-            val fallback = sampleWords.mapIndexed { idx, card ->
-                val otherTranslations = cards.filter { it.id != card.id }.map { it.translation }.shuffled().take(3)
+            // Fallback questions guaranteed to cover every target card
+            val fallback = sampleWords.map { card ->
+                val tag = if (card.isMastered) "🔄 Yodlanganlardan takrorlash" else "🎯 Bugungi so'z"
+                val otherTranslations = allCards.filter { it.id != card.id }.map { it.translation }.shuffled().take(3)
                 val allOpts = (listOf(card.translation) + otherTranslations).shuffled()
                 com.example.data.model.QuizQuestion(
-                    question = "\"${card.word}\" so'zining to'g'ri ma'nosi qaysi?",
+                    cardId = card.id,
+                    question = "[$tag]\n\"${card.word}\" so'zining to'g'ri ma'nosi qaysi?",
                     options = if (allOpts.size >= 4) allOpts else listOf(card.translation, "Boshqa ma'no", "Qat'iy reja", "Vaqt qadri"),
                     correctIndex = allOpts.indexOf(card.translation).coerceAtLeast(0),
-                    explanation = "${card.word} — ${card.translation}"
+                    explanation = "$tag: ${card.word} — ${card.translation}"
                 )
             }
             _uiState.update { it.copy(quizQuestions = fallback, isQuizLoading = false) }
+        }
+    }
+
+    fun submitQuizResults(correctCardIds: List<String>, failedCardIds: List<String>) {
+        viewModelScope.launch {
+            val allCards = prefs.getVocabCards().toMutableList()
+            val todayIso = TaskTimeEngine.getIsoDateForOffset(0)
+            var newlyMasteredCount = 0
+
+            val updatedCards = allCards.map { card ->
+                if (correctCardIds.contains(card.id)) {
+                    if (!card.isMastered) newlyMasteredCount++
+                    card.copy(
+                        isMastered = true,
+                        boxLevel = 4,
+                        learnedDate = todayIso,
+                        lastReviewedEpochMs = System.currentTimeMillis()
+                    )
+                } else {
+                    card
+                }
+            }
+
+            prefs.saveVocabCards(updatedCards)
+            repeat(newlyMasteredCount) {
+                prefs.incrementVocabLearnedToday()
+            }
+
+            // Remove mastered cards from today's active batch, KEEP unmastered / failed cards!
+            val currentBatchIds = prefs.getTodayVocabBatchIds()
+            val remainingBatchIds = currentBatchIds.filter { id ->
+                id !in correctCardIds
+            }
+            prefs.saveTodayVocabBatchIds(remainingBatchIds)
+
+            val totalQuestions = correctCardIds.size + failedCardIds.size
+            val percent = if (totalQuestions > 0) {
+                (correctCardIds.size.toDouble() / totalQuestions.toDouble()) * 100.0
+            } else 0.0
+
+            val failedSet = failedCardIds.toSet()
+            if (failedSet.isEmpty()) {
+                prefs.markQuizPassedToday()
+                prefs.clearQuizFailedWordIds()
+                _uiState.update {
+                    it.copy(
+                        vocabCards = updatedCards,
+                        todayVocabCardIds = remainingBatchIds,
+                        isQuizPassedToday = true,
+                        quizFailedWordIds = emptySet(),
+                        isQuizRetryMode = false,
+                        vocabLearnedTodayCount = prefs.vocabLearnedTodayCount
+                    )
+                }
+                _userMessage.emit("🎉 Qoyil! Barcha ${correctCardIds.size} ta so'zni a'lo yodladingiz (100%)! Yodlanganlar safiga qo'shildi.")
+            } else {
+                prefs.setQuizFailedWordIds(failedSet)
+                _uiState.update {
+                    it.copy(
+                        vocabCards = updatedCards,
+                        todayVocabCardIds = remainingBatchIds,
+                        isQuizPassedToday = false,
+                        quizFailedWordIds = failedSet,
+                        isQuizRetryMode = false,
+                        vocabLearnedTodayCount = prefs.vocabLearnedTodayCount
+                    )
+                }
+                _userMessage.emit("${correctCardIds.size} ta so'z yodlanganlar safiga o'tdi! Topa olmagan ${failedSet.size} ta so'z bugungi ro'yxatingizda qoldi. 'Yana yodlash' tugmasi orqali yangi so'zlar qo'shishingiz mumkin.")
+            }
         }
     }
 
@@ -1526,5 +1839,24 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _userMessage.emit("✨ Gemini API kaliti saqlandi va faollashtirildi!")
         }
+    }
+
+    // --- 1 Oylik Ingliz Tili Rejasi (A2) ---
+    fun setActiveEnglishPlanWeek(week: Int) {
+        val safeWeek = week.coerceIn(1, 4)
+        prefs.setActiveEnglishPlanWeek(safeWeek)
+        _uiState.update { it.copy(activeEnglishPlanWeek = safeWeek) }
+    }
+
+    fun toggleEnglishPlanTask(taskId: String) {
+        val isCompleted = prefs.toggleEnglishPlanTaskId(taskId)
+        val updatedSet = prefs.getCompletedEnglishPlanTaskIds()
+        _uiState.update { it.copy(completedEnglishPlanTaskIds = updatedSet) }
+        val msg = if (isCompleted) "✅ Rejadagi vazifa bajarildi!" else "Vazifa qayta ochildi"
+        viewModelScope.launch { _userMessage.emit(msg) }
+    }
+
+    fun setEnglishPlanModalOpen(isOpen: Boolean) {
+        _uiState.update { it.copy(isEnglishPlanModalOpen = isOpen) }
     }
 }

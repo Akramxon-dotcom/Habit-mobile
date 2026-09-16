@@ -13,6 +13,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
+import android.view.KeyEvent
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -55,6 +56,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -68,6 +70,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -98,6 +101,8 @@ import com.example.ui.theme.HabitTheme
 import com.example.widget.HabitAppWidgetProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -117,6 +122,7 @@ class AlarmActivity : ComponentActivity() {
 
     private var mediaPlayer: MediaPlayer? = null
     private var vibrator: Vibrator? = null
+    private var fadeJob: Job? = null
     private lateinit var prefs: HabitPreferences
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -124,7 +130,7 @@ class AlarmActivity : ComponentActivity() {
         prefs = HabitPreferences(this)
 
         configureWindowForLockScreen()
-        startAlarmAudioAndVibration()
+        // Sound and vibration start gradually only AFTER screen & buttons are rendered!
 
         val taskId = intent.getStringExtra(EXTRA_TASK_ID) ?: ""
         val taskTitle = intent.getStringExtra(EXTRA_TASK_TITLE)?.ifBlank { "Kun tartibi vazifasi" } ?: "Kun tartibi vazifasi"
@@ -139,8 +145,11 @@ class AlarmActivity : ComponentActivity() {
                     category = category,
                     endTime = endTime,
                     note = note,
-                    isMuted = prefs.shouldMuteAlarm(),
+                    isMuted = prefs.shouldMuteAlarm(this),
                     isAtSchool = prefs.isAtSchool || prefs.isSchoolMuted,
+                    onStartGradualAlarm = {
+                        startAlarmAudioAndVibrationGradual()
+                    },
                     onDone = {
                         handleAnswerDone(taskId, taskTitle, endTime)
                     },
@@ -156,6 +165,17 @@ class AlarmActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        // Pressing volume down/up or power key immediately silences the alarm sound & vibration
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
+            keyCode == KeyEvent.KEYCODE_VOLUME_UP ||
+            keyCode == KeyEvent.KEYCODE_POWER) {
+            stopAlarmAudioAndVibration()
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
     }
 
     private fun configureWindowForLockScreen() {
@@ -175,70 +195,90 @@ class AlarmActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
-    private fun startAlarmAudioAndVibration() {
-        val shouldMute = prefs.shouldMuteAlarm()
+    private fun startAlarmAudioAndVibrationGradual() {
+        val shouldMute = prefs.shouldMuteAlarm(this)
         if (shouldMute) {
             Log.d(TAG, "AlarmActivity: Signal ovozsiz holatda (shouldMuteAlarm=true, isAlarmMuted=${prefs.isAlarmMuted}, isAtSchool=${prefs.isAtSchool})")
         } else {
-            // Only start our own MediaPlayer if AlarmRingtoneService is not already playing audio
-            if (!AlarmRingtoneService.isServiceRunning()) {
-                try {
-                    val alertUri: Uri = when (prefs.alarmSoundTone) {
-                        "NOTIFICATION" -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-                        "RINGTONE" -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-                        else -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-                            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-                    }
-
-                    val vol = prefs.alarmVolume.coerceIn(0.05f, 1f)
-
-                    mediaPlayer = MediaPlayer().apply {
-                        setAudioAttributes(
-                            AudioAttributes.Builder()
-                                .setUsage(AudioAttributes.USAGE_ALARM)
-                                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                                .setLegacyStreamType(AudioManager.STREAM_ALARM)
-                                .build()
-                        )
-                        setDataSource(applicationContext, alertUri)
-                        setVolume(vol, vol)
-                        isLooping = true
-                        prepare()
-                        start()
-                    }
-                    Log.d(TAG, "AlarmActivity: Audio chalish boshlandi (vol=$vol)")
-                } catch (e: Exception) {
-                    Log.e(TAG, "MediaPlayer xatolik: ${e.message}", e)
+            try {
+                val alertUri: Uri = when (prefs.alarmSoundTone) {
+                    "NOTIFICATION" -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                    "RINGTONE" -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                    else -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                        ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                        ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
                 }
-            } else {
-                Log.d(TAG, "AlarmActivity: AlarmRingtoneService allaqachon audio chalmoqda")
+
+                val targetVol = prefs.alarmVolume.coerceIn(0.1f, 1f)
+                val initialVol = 0.04f
+
+                mediaPlayer?.release()
+                mediaPlayer = MediaPlayer().apply {
+                    setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_ALARM)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .setLegacyStreamType(AudioManager.STREAM_ALARM)
+                            .build()
+                    )
+                    setDataSource(applicationContext, alertUri)
+                    setVolume(initialVol, initialVol)
+                    isLooping = true
+                    prepare()
+                    start()
+                }
+
+                // Sekin-astalik bilan ovozni ko'tarish (fade-in over 4 seconds)
+                fadeJob?.cancel()
+                fadeJob = CoroutineScope(Dispatchers.Main).launch {
+                    val steps = 8
+                    val stepDelay = 500L
+                    for (i in 1..steps) {
+                        delay(stepDelay)
+                        if (mediaPlayer == null) break
+                        val currentStepVol = initialVol + (targetVol - initialVol) * (i.toFloat() / steps)
+                        try {
+                            mediaPlayer?.setVolume(currentStepVol, currentStepVol)
+                        } catch (e: Exception) {
+                            break
+                        }
+                    }
+                }
+                Log.d(TAG, "AlarmActivity: Audio sekin-astalik bilan boshlandi (target=$targetVol)")
+            } catch (e: Exception) {
+                Log.e(TAG, "MediaPlayer xatolik: ${e.message}", e)
             }
         }
 
-        try {
-            vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-                vibratorManager?.defaultVibrator
-            } else {
-                @Suppress("DEPRECATION")
-                getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-            }
+        // Sekin-astalik bilan tebranish (Gentle intermittent vibration)
+        if (!prefs.shouldMuteVibration(this)) {
+            try {
+                vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                    vibratorManager?.defaultVibrator
+                } else {
+                    @Suppress("DEPRECATION")
+                    getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                }
 
-            val pattern = longArrayOf(0, 800, 400, 800, 400)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val effect = VibrationEffect.createWaveform(pattern, 0)
-                vibrator?.vibrate(effect)
-            } else {
-                @Suppress("DEPRECATION")
-                vibrator?.vibrate(pattern, 0)
+                // Yumshoq tebranish: 0ms boshlanadi, 350ms tebranadi, 1200ms pauza, 350ms tebranadi...
+                val pattern = longArrayOf(0, 350, 1200, 350, 1200)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val effect = VibrationEffect.createWaveform(pattern, 0)
+                    vibrator?.vibrate(effect)
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator?.vibrate(pattern, 0)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Vibrator xatolik: ${e.message}", e)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Vibrator xatolik: ${e.message}", e)
         }
     }
 
     private fun stopAlarmAudioAndVibration() {
+        fadeJob?.cancel()
+        fadeJob = null
         try {
             mediaPlayer?.stop()
             mediaPlayer?.release()
@@ -357,6 +397,7 @@ fun AlarmScreen(
     note: String,
     isMuted: Boolean = false,
     isAtSchool: Boolean = false,
+    onStartGradualAlarm: () -> Unit = {},
     onDone: () -> Unit,
     onStopRingtone: () -> Unit,
     onSnooze: (Int) -> Unit,
@@ -365,6 +406,15 @@ fun AlarmScreen(
     var showSnoozeSelection by remember { mutableStateOf(false) }
     var selectedMinutes by remember { mutableIntStateOf(10) }
     var isSubmitting by remember { mutableStateOf(false) }
+    var isRingingSilenced by remember { mutableStateOf(false) }
+
+    // Sekin-astalik bilan musiqa va vibratsiya faqat ekran yonib, tugmalar to'liq ko'ringandan so'ng boshlanadi
+    LaunchedEffect(Unit) {
+        delay(700L)
+        if (!isRingingSilenced) {
+            onStartGradualAlarm()
+        }
+    }
 
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val scale by infiniteTransition.animateFloat(
@@ -467,6 +517,58 @@ fun AlarmScreen(
                                 }
                             }
                         }
+
+                        // Tezkor ovozni to'xtatish / holat tugmasi
+                        if (!isRingingSilenced && !isMuted) {
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Button(
+                                onClick = {
+                                    isRingingSilenced = true
+                                    onStopRingtone()
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFEF5350).copy(alpha = 0.22f),
+                                    contentColor = Color(0xFFFFCDD2)
+                                ),
+                                border = BorderStroke(1.dp, Color(0xFFEF5350).copy(alpha = 0.55f)),
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.testTag("alarm_btn_silence")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.VolumeOff,
+                                    contentDescription = "Ovozni o'chirish",
+                                    modifier = Modifier.size(18.dp),
+                                    tint = Color(0xFFFFCDD2)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "🔕 Tovushni to'xtatish",
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        } else if (isRingingSilenced) {
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFF4CAF50).copy(alpha = 0.18f),
+                                border = BorderStroke(1.dp, Color(0xFF4CAF50).copy(alpha = 0.45f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("🔕", fontSize = 13.sp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Tovush to'xtatildi. Vazifa holatini tanlang",
+                                        color = Color(0xFFC8E6C9),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(24.dp))
@@ -537,6 +639,8 @@ fun AlarmScreen(
                         Button(
                             onClick = {
                                 if (!isSubmitting) {
+                                    isRingingSilenced = true
+                                    onStopRingtone()
                                     isSubmitting = true
                                     onDone()
                                 }
@@ -581,6 +685,7 @@ fun AlarmScreen(
                         // 2. YO'Q / BAJARMADIM BUTTON (Opens Snooze dialog)
                         OutlinedButton(
                             onClick = {
+                                isRingingSilenced = true
                                 onStopRingtone() // Stop audio so user can comfortably choose snooze duration
                                 showSnoozeSelection = true
                             },

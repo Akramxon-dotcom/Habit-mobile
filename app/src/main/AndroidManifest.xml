@@ -52,6 +52,16 @@
             android:turnScreenOn="true"
             android:theme="@style/Theme.MyApplication" />
 
+        <activity
+            android:name=".ui.block.FocusBlockActivity"
+            android:exported="false"
+            android:taskAffinity="com.example.focus_block"
+            android:launchMode="singleInstance"
+            android:excludeFromRecents="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@style/Theme.MyApplication" />
+
         <service
             android:name=".service.HabitLocationService"
             android:exported="false"
