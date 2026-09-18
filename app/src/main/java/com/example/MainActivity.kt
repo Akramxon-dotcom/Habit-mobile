@@ -142,6 +142,9 @@ class MainActivity : ComponentActivity() {
                         onMarkTaskCompleted = { item ->
                             viewModel.markTaskCompleted(item)
                         },
+                        onUndoTaskCompleted = { item ->
+                            viewModel.undoTaskCompleted(item)
+                        },
                         onDelaySchedule = { minutes ->
                             viewModel.delaySchedule(minutes)
                         },
@@ -271,8 +274,60 @@ class MainActivity : ComponentActivity() {
                         onTestTelegramConnection = { token, chatId -> viewModel.testTelegramConnection(token, chatId) },
                         onSelectEnglishPlanWeek = { week -> viewModel.setActiveEnglishPlanWeek(week) },
                         onToggleEnglishPlanTask = { taskId -> viewModel.toggleEnglishPlanTask(taskId) },
-                        onSetEnglishPlanModalOpen = { isOpen -> viewModel.setEnglishPlanModalOpen(isOpen) }
+                        onSetEnglishPlanModalOpen = { isOpen -> viewModel.setEnglishPlanModalOpen(isOpen) },
+                        onOpenGradedReader = { viewModel.setGradedReaderOpen(true) },
+                        onOpenSpeakingRoom = { viewModel.setSpeakingRoomOpen(true) },
+                        onOpenEveningJournalCoach = { viewModel.setEveningJournalCoachOpen(true) },
+                        onOpenSmartReschedule = { viewModel.setSmartRescheduleOpen(true) },
+                        onOpenMurphyGrammar = { viewModel.setMurphyGrammarOpen(true) }
                     )
+
+                    if (uiState.isGradedReaderOpen) {
+                        com.example.ui.screen.GradedReaderScreen(
+                            onBack = { viewModel.setGradedReaderOpen(false) },
+                            onAddWordToVault = { word, uzbek, pos ->
+                                viewModel.addWordFromReaderToVault(word, uzbek, pos)
+                            },
+                            onChapterCompleted = { bookTitle, chapterTitle ->
+                                viewModel.completeReaderChapter(bookTitle, chapterTitle)
+                            }
+                        )
+                    }
+
+                    if (uiState.isSpeakingRoomOpen) {
+                        com.example.ui.screen.SpeakingRoomScreen(
+                            onBack = { viewModel.setSpeakingRoomOpen(false) }
+                        )
+                    }
+
+                    if (uiState.isEveningJournalCoachOpen) {
+                        com.example.ui.screen.EveningJournalCoachScreen(
+                            onBack = { viewModel.setEveningJournalCoachOpen(false) },
+                            onSaveToJournal = { text ->
+                                viewModel.saveEveningJournalSentences(text)
+                            }
+                        )
+                    }
+
+                    if (uiState.isSmartRescheduleOpen) {
+                        com.example.ui.screen.SmartRescheduleDialog(
+                            currentSchedule = uiState.scheduleItems,
+                            currentTaskTitle = uiState.activeScheduleItem?.title ?: uiState.habitState.title,
+                            onApplyNewSchedule = { newItems ->
+                                viewModel.applyRescheduledItems(newItems)
+                            },
+                            onDismiss = { viewModel.setSmartRescheduleOpen(false) }
+                        )
+                    }
+
+                    if (uiState.isMurphyGrammarOpen) {
+                        com.example.ui.screen.MurphyGrammarScreen(
+                            onBack = { viewModel.setMurphyGrammarOpen(false) },
+                            onModuleCompleted = { moduleId ->
+                                viewModel.completeMurphyGrammarModule(moduleId)
+                            }
+                        )
+                    }
 
                     if (showPermissionsDialog) {
                         PermissionsDialog(

@@ -6,6 +6,7 @@ import android.util.Base64
 import android.util.Log
 import com.example.BuildConfig
 import com.example.data.local.HabitPreferences
+import com.example.data.util.UniversalDictionary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -21,12 +22,12 @@ object GeminiClient {
 
     private const val TAG = "GeminiClient"
     private const val PRIMARY_MODEL = "gemini-2.5-flash"
-    private const val SECONDARY_MODEL = "gemini-1.5-flash"
+    private const val SECONDARY_MODEL = "gemini-3.5-flash"
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
         .build()
 
     fun getApiKey(context: Context? = null): String {
@@ -403,6 +404,59 @@ object GeminiClient {
 
     private fun smartLocalFallback(prompt: String): String {
         return when {
+            prompt.contains("SpeakingRoom") || prompt.contains("[RESPONSE]:") || prompt.contains("A2 Elementary English teacher") || prompt.contains("Conversation history:") -> {
+                val userSpeech = prompt.substringAfter("User just said: \"").substringBefore("\"").trim()
+                val lower = userSpeech.lowercase()
+                val (reply, feed, shadow) = when {
+                    lower.contains("hello") || lower.contains("hi") -> Triple(
+                        "Hello Akramjon! It is great to hear from you. How is your day going today?",
+                        "Ajoyib salomlashish! Ingliz tilida suhbatlashishga doim tayyorman.",
+                        "It is great to hear from you."
+                    )
+                    lower.contains("wake up") || lower.contains("morning") || lower.contains("o'clock") -> Triple(
+                        "Waking up on time is very important! Do you drink tea or coffee after waking up?",
+                        "Juda yaxshi! Present Simple zamoni to'g'ri ishlatildi.",
+                        "Waking up on time is very important."
+                    )
+                    lower.contains("yesterday") || lower.contains("went") || lower.contains("studied") -> Triple(
+                        "That sounds like a productive day! What was the most interesting thing you learned?",
+                        "O'tgan zamon (Past Simple) juda yaxshi ifodalangan.",
+                        "That sounds like a productive day."
+                    )
+                    lower.contains("weekend") || lower.contains("plan") || lower.contains("going to") -> Triple(
+                        "That sounds like a wonderful weekend plan! Who are you going to spend time with?",
+                        "Kelasi reja (Future) uchun to'g'ri ibora ishlatildi.",
+                        "That sounds like a wonderful weekend plan."
+                    )
+                    lower.contains("coffee") || lower.contains("tea") || lower.contains("order") -> Triple(
+                        "Here is your hot drink! That will be three dollars. Would you like anything else?",
+                        "Kafeda buyurtma berish iboralari juda tabiiy chiqdi.",
+                        "Would you like anything else?"
+                    )
+                    else -> Triple(
+                        "That is very interesting! Can you explain a little bit more about that?",
+                        "Gapingiz tushunarli. Fikringizni qisqa jumlalar bilan davom ettiring.",
+                        "Can you explain a little bit more about that?"
+                    )
+                }
+                """
+                [RESPONSE]: $reply
+                [FEEDBACK_UZ]: $feed
+                [SHADOWING]: $shadow
+                """.trimIndent()
+            }
+            prompt.contains("Explain English word") || prompt.contains("GradedReader") || prompt.contains("look up the word") -> {
+                val word = prompt.substringAfter("Word: \"").substringBefore("\"").trim()
+                """
+                {
+                  "word": "$word",
+                  "uzbekMeaning": "matn ma'nosi bo'yicha",
+                  "phonetic": "[/${word.lowercase()}/]",
+                  "partOfSpeech": "so'z",
+                  "example": "He read the book carefully."
+                }
+                """.trimIndent()
+            }
             prompt.contains("Task details:") -> {
                 """
                 {
@@ -435,10 +489,13 @@ object GeminiClient {
                 }
                 """.trimIndent()
             }
-            else -> {
+            prompt.contains("category") || prompt.contains("jadval") || prompt.contains("reja") -> {
                 """
                 {"category":"work","start":"15:00","end":"16:00","priority":"orta","note":"Reja asosida to'liq bajaring"}
                 """.trimIndent()
+            }
+            else -> {
+                "Hello! How can I assist you with your English learning today?"
             }
         }
     }
@@ -502,6 +559,90 @@ object GeminiClient {
         // Safe fallback - keep original tasks intact
         val fallbackList = tasks.map { ReplanItem(id = it.id, newStart = it.start, newEnd = it.end) }
         Result.success(fallbackList)
+    }
+
+    suspend fun lookupWordContextual(
+        word: String,
+        sentenceContext: String,
+        context: Context? = null
+    ): VocabAiResult = withContext(Dispatchers.IO) {
+        val cleanWord = word.trim()
+
+        // 1. Instant local universal dictionary lookup
+        val localMatch = UniversalDictionary.lookup(cleanWord, context)
+
+        val prompt = """
+            Explain English word for an Uzbek learner (A2-B1 level).
+            Word: "$cleanWord"
+            Context sentence: "$sentenceContext"
+            
+            Return ONLY a valid JSON object with these keys:
+            {
+              "word": "$cleanWord",
+              "uzbekTranslation": "aniq o'zbekcha tarjimasi (1-3 ta so'z)",
+              "phonetic": "[IPA transkripsiyasi, masalan /ˈwɔːkɪŋ/]",
+              "partOfSpeech": "noun / verb / adjective / adverb",
+              "definition": "Simple English explanation (1 short sentence)",
+              "exampleSentence": "A natural example sentence using the word",
+              "mnemonicTip": "O'zbek tilida eslab qolish uchun maslahat yoki ma'no nozikligi"
+            }
+        """.trimIndent()
+
+        val raw = generateText(prompt, context).getOrNull() ?: ""
+        val jsonStr = extractJsonObject(raw)
+        if (jsonStr != null) {
+            try {
+                val obj = JSONObject(jsonStr)
+                val trans = obj.optString("uzbekTranslation", "").trim()
+                if (trans.isNotBlank() && !trans.contains("ma'nosi")) {
+                    return@withContext VocabAiResult(
+                        word = obj.optString("word", cleanWord),
+                        uzbekTranslation = trans,
+                        phonetic = obj.optString("phonetic", localMatch?.phonetic ?: "[${cleanWord}]"),
+                        partOfSpeech = obj.optString("partOfSpeech", localMatch?.partOfSpeech ?: "vocabulary"),
+                        definition = obj.optString("definition", "English word"),
+                        exampleSentence = obj.optString("exampleSentence", sentenceContext),
+                        mnemonicTip = obj.optString("mnemonicTip", "So'zni gap ichida yodlang.")
+                    )
+                }
+            } catch (e: Exception) {
+                // fallback below
+            }
+        }
+
+        // If local match exists, use its accurate definition
+        if (localMatch != null) {
+            return@withContext VocabAiResult(
+                word = cleanWord,
+                uzbekTranslation = localMatch.translationUz,
+                phonetic = localMatch.phonetic,
+                partOfSpeech = localMatch.partOfSpeech,
+                definition = "CEFR ${localMatch.level} darajadagi asosiy lug'at",
+                exampleSentence = localMatch.exampleSentence.ifBlank { sentenceContext.ifBlank { "He used '$cleanWord' in this sentence." } },
+                mnemonicTip = localMatch.exampleTranslation.ifBlank { "Bu so'z mutolaada faol ishlatiladi." }
+            )
+        }
+
+        // Heuristic fallback
+        val derived = deriveUzbekMeaningLocally(cleanWord)
+        VocabAiResult(
+            word = cleanWord,
+            uzbekTranslation = derived,
+            phonetic = "[${cleanWord.lowercase()}]",
+            partOfSpeech = "vocabulary",
+            definition = "Kitobdagi inglizcha so'z",
+            exampleSentence = sentenceContext.ifBlank { "Notice how '$cleanWord' is used in the text." },
+            mnemonicTip = "Matndagi kontekst asosida o'rganing."
+        )
+    }
+
+    private fun deriveUzbekMeaningLocally(word: String): String {
+        val lower = word.lowercase().trim()
+        val candidates = UniversalDictionary.generateCandidates(lower)
+        for (cand in candidates) {
+            UniversalDictionary.BUILTIN_VOCABULARY[cand]?.let { return it.uz }
+        }
+        return "ma'nodosh so'z (matndan anglash)"
     }
 }
 

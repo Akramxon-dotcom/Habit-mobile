@@ -111,6 +111,10 @@ fun VocabScreen(
     completedEnglishPlanTaskIds: Set<String> = emptySet(),
     onSelectEnglishPlanWeek: (Int) -> Unit = {},
     onToggleEnglishPlanTask: (String) -> Unit = {},
+    onOpenReader: () -> Unit = {},
+    onOpenSpeakingRoom: () -> Unit = {},
+    onOpenEveningCoach: () -> Unit = {},
+    onOpenMurphy: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val theme = LocalLiquidTheme.current
@@ -499,6 +503,80 @@ fun VocabScreen(
         }
 
         if (selectedViewMode == "PLAN") {
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 10.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+                    border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.35f))
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("⚡", fontSize = 16.sp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                "Interaktiv Amaliyot Modullari:",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = theme.primaryAccent
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .background(theme.primaryAccent.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                                    .border(1.dp, theme.primaryAccent.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                                    .clickable { onOpenReader() }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("📖 Reader", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .background(theme.accentSecondary.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                                    .border(1.dp, theme.accentSecondary.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                                    .clickable { onOpenSpeakingRoom() }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("🎙️ Speaking", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .background(Color(0xFF10B981).copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                                    .border(1.dp, Color(0xFF10B981).copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                                    .clickable { onOpenEveningCoach() }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("✍️ 5 Jumla", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .background(Color(0xFF8B5CF6).copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                                    .border(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                                    .clickable { onOpenMurphy() }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("🧩 Murphy", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+                            }
+                        }
+                    }
+                }
+            }
+
             monthlyPlanLazyItems(
                 activeWeek = activeEnglishPlanWeek,
                 completedTaskIds = completedEnglishPlanTaskIds,

@@ -162,7 +162,14 @@ data class HabitUiState(
     // 1 Oylik Ingliz Tili Rejasi (A2)
     val activeEnglishPlanWeek: Int = 1,
     val completedEnglishPlanTaskIds: Set<String> = emptySet(),
-    val isEnglishPlanModalOpen: Boolean = false
+    val isEnglishPlanModalOpen: Boolean = false,
+
+    // 5 Mega Features
+    val isGradedReaderOpen: Boolean = false,
+    val isSpeakingRoomOpen: Boolean = false,
+    val isEveningJournalCoachOpen: Boolean = false,
+    val isSmartRescheduleOpen: Boolean = false,
+    val isMurphyGrammarOpen: Boolean = false
 )
 
 class HabitViewModel(application: Application) : AndroidViewModel(application) {
@@ -446,6 +453,30 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
             viewModelScope.launch {
                 _userMessage.emit("🎉 «${item.title}» muvaffaqiyatli bajarildi deb belgilandi!")
             }
+        }
+        updateRealtimeMetrics()
+        triggerSystemVisualSync()
+    }
+
+    fun undoTaskCompleted(item: ScheduleItem) {
+        prefs.setTaskDone(item.id, false)
+        prefs.setTaskDoneByTitle(item.title, false)
+        val updated = prefs.getSchedule().map {
+            if (it.id == item.id || it.title.trim().equals(item.title.trim(), ignoreCase = true)) {
+                it.copy(isDone = false)
+            } else it
+        }
+        prefs.saveSchedule(updated)
+        _uiState.update { state ->
+            val newItems = state.scheduleItems.map {
+                if (it.id == item.id || it.title.trim().equals(item.title.trim(), ignoreCase = true)) {
+                    it.copy(isDone = false)
+                } else it
+            }
+            state.copy(scheduleItems = newItems)
+        }
+        viewModelScope.launch {
+            _userMessage.emit("↺ «${item.title}» bekor qilindi (qayta faollashtirildi)!")
         }
         updateRealtimeMetrics()
         triggerSystemVisualSync()
@@ -1858,5 +1889,71 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setEnglishPlanModalOpen(isOpen: Boolean) {
         _uiState.update { it.copy(isEnglishPlanModalOpen = isOpen) }
+    }
+
+    // --- 5 Mega English & Discipline Features ---
+    fun setGradedReaderOpen(isOpen: Boolean) {
+        _uiState.update { it.copy(isGradedReaderOpen = isOpen) }
+    }
+
+    fun setSpeakingRoomOpen(isOpen: Boolean) {
+        _uiState.update { it.copy(isSpeakingRoomOpen = isOpen) }
+    }
+
+    fun setEveningJournalCoachOpen(isOpen: Boolean) {
+        _uiState.update { it.copy(isEveningJournalCoachOpen = isOpen) }
+    }
+
+    fun setSmartRescheduleOpen(isOpen: Boolean) {
+        _uiState.update { it.copy(isSmartRescheduleOpen = isOpen) }
+    }
+
+    fun setMurphyGrammarOpen(isOpen: Boolean) {
+        _uiState.update { it.copy(isMurphyGrammarOpen = isOpen) }
+    }
+
+    fun addWordFromReaderToVault(word: String, uzbek: String, pos: String) {
+        val newCard = com.example.data.model.VocabCard(
+            word = word,
+            translation = uzbek,
+            partOfSpeech = pos,
+            boxLevel = 1
+        )
+        val current = prefs.getVocabCards().toMutableList()
+        current.add(0, newCard)
+        prefs.saveVocabCards(current)
+        _uiState.update { it.copy(vocabCards = current) }
+        viewModelScope.launch { _userMessage.emit("⭐ '$word' lug'atingizga saqlandi!") }
+    }
+
+    fun applyRescheduledItems(newItems: List<com.example.data.model.ScheduleItem>) {
+        val active = newItems.find { it.title == _uiState.value.habitState.title }
+        _uiState.update { state ->
+            state.copy(
+                scheduleItems = newItems,
+                habitState = if (active != null) state.habitState.copy(start = active.start, end = active.end) else state.habitState
+            )
+        }
+        viewModelScope.launch { _userMessage.emit("⚡ Jadval kechikishga moslab qayta taqsimlandi!") }
+    }
+
+    fun saveEveningJournalSentences(entryText: String) {
+        saveDailyJournal(
+            stars = 5,
+            highlights = "Kechki 5 ta jumla inglizcha yozildi va AI orqali tekshirildi.",
+            challenges = "",
+            reflections = entryText
+        )
+        toggleEnglishPlanTask("w1_writing")
+    }
+
+    fun completeMurphyGrammarModule(moduleId: String) {
+        toggleEnglishPlanTask("w1_murphy")
+        viewModelScope.launch { _userMessage.emit("🎉 Murphy grammatika moduli yakunlandi! (+50 XP)") }
+    }
+
+    fun completeReaderChapter(bookTitle: String, chapterTitle: String) {
+        toggleEnglishPlanTask("w1_reading")
+        viewModelScope.launch { _userMessage.emit("📖 '$bookTitle' kitobining $chapterTitle o'qib tugatildi! (+40 XP)") }
     }
 }

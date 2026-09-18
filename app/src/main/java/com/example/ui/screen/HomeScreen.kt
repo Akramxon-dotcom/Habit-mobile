@@ -1,11 +1,15 @@
 package com.example.ui.screen
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,6 +28,16 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.IntOffset
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -130,6 +145,7 @@ fun HomeScreen(
     onDeleteScheduleItem: (String) -> Unit = {},
     onUpdateCurrentTask: (title: String, category: String, start: String, end: String, note: String, blocking: Boolean) -> Unit = { _, _, _, _, _, _ -> },
     onMarkTaskCompleted: (ScheduleItem) -> Unit = {},
+    onUndoTaskCompleted: (ScheduleItem) -> Unit = {},
     onDelaySchedule: (minutes: Int) -> Unit = {},
     onSelectTab: (tab: Int) -> Unit = {},
     onSelectDayOffset: (offset: Int) -> Unit = {},
@@ -180,7 +196,12 @@ fun HomeScreen(
     onTestTelegramConnection: (String, String) -> Unit = { _, _ -> },
     onSelectEnglishPlanWeek: (Int) -> Unit = {},
     onToggleEnglishPlanTask: (String) -> Unit = {},
-    onSetEnglishPlanModalOpen: (Boolean) -> Unit = {}
+    onSetEnglishPlanModalOpen: (Boolean) -> Unit = {},
+    onOpenGradedReader: () -> Unit = {},
+    onOpenSpeakingRoom: () -> Unit = {},
+    onOpenEveningJournalCoach: () -> Unit = {},
+    onOpenSmartReschedule: () -> Unit = {},
+    onOpenMurphyGrammar: () -> Unit = {}
 ) {
     var showAddTaskDialog by remember { mutableStateOf(false) }
     var showDelayDialog by remember { mutableStateOf(false) }
@@ -317,21 +338,17 @@ fun HomeScreen(
                         )
                     }
 
-                    // 2b. Modern Habit Design Archetype Selector (Switch between 6 fundamentally distinct styles)
-                    item {
-                        LiquidThemeSelectorBar(
-                            selectedThemeId = state.selectedThemeId,
-                            onSelectTheme = onSelectTheme
-                        )
-                    }
-
-                    // 2c. 1 Oylik Ingliz Tili Rejasi (A2) Home Preview Card
+                    // 2b. 1 Oylik Ingliz Tili Rejasi (A2) Home Preview Card
                     item {
                         Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) {
                             MonthlyEnglishPlanHomeCard(
                                 activeWeek = state.activeEnglishPlanWeek,
                                 completedTaskIds = state.completedEnglishPlanTaskIds,
-                                onOpenFullPlan = { onSetEnglishPlanModalOpen(true) }
+                                onOpenFullPlan = { onSetEnglishPlanModalOpen(true) },
+                                onOpenReader = onOpenGradedReader,
+                                onOpenSpeakingRoom = onOpenSpeakingRoom,
+                                onOpenEveningCoach = onOpenEveningJournalCoach,
+                                onOpenMurphy = onOpenMurphyGrammar
                             )
                         }
                     }
@@ -434,7 +451,13 @@ fun HomeScreen(
                                 HabitTimelineRow(
                                     item = item,
                                     isCurrent = isCurrent,
-                                    onClick = { selectedItemForDetails = item }
+                                    onClick = { selectedItemForDetails = item },
+                                    onComplete = { taskItem ->
+                                        onMarkTaskCompleted(taskItem)
+                                    },
+                                    onUndo = { taskItem ->
+                                        onUndoTaskCompleted(taskItem)
+                                    }
                                 )
                             }
                         }
@@ -560,6 +583,10 @@ fun HomeScreen(
                     completedEnglishPlanTaskIds = state.completedEnglishPlanTaskIds,
                     onSelectEnglishPlanWeek = onSelectEnglishPlanWeek,
                     onToggleEnglishPlanTask = onToggleEnglishPlanTask,
+                    onOpenReader = onOpenGradedReader,
+                    onOpenSpeakingRoom = onOpenSpeakingRoom,
+                    onOpenEveningCoach = onOpenEveningJournalCoach,
+                    onOpenMurphy = onOpenMurphyGrammar,
                     modifier = Modifier.padding(innerPadding)
                 )
             }
@@ -747,6 +774,23 @@ fun HomeScreen(
                                 Text("+$mins", color = HabitGold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Button(
+                        onClick = {
+                            showDelayDialog = false
+                            onOpenSmartReschedule()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = HabitGold),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            "⚡ Aqlli Qayta Taqsimlash (Namoz & Darslarni saqlash)",
+                            color = Color(0xFF241C08),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.5.sp
+                        )
                     }
                 }
             },
@@ -2365,17 +2409,40 @@ fun HabitSegmentHeader(segmentName: String) {
 fun HabitTimelineRow(
     item: ScheduleItem,
     isCurrent: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onComplete: (ScheduleItem) -> Unit = {},
+    onUndo: (ScheduleItem) -> Unit = {}
 ) {
+    val theme = LocalLiquidTheme.current
+    val haptic = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    var isDragging by remember { mutableStateOf(false) }
+    var holdProgress by remember { mutableFloatStateOf(0f) }
+    var holdJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
+    val animatedOffset by animateFloatAsState(
+        targetValue = if (isDragging) dragOffset else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "swipe_offset"
+    )
+
+    val animatedCardAlpha by animateFloatAsState(
+        targetValue = if (item.isDone) 0.72f else 1f,
+        label = "card_alpha"
+    )
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 3.dp)
-            .clickable { onClick() },
+            .padding(horizontal = 20.dp, vertical = 3.dp),
         verticalAlignment = Alignment.Top
     ) {
         // Left Column: Category Circle Icon and Vertical Connector Line
-        val theme = LocalLiquidTheme.current
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.width(32.dp)
@@ -2386,7 +2453,7 @@ fun HabitTimelineRow(
                     .clip(CircleShape)
                     .background(
                         when {
-                            item.isDone -> Color(0xFF2E7D32).copy(alpha = 0.85f)
+                            item.isDone -> Color(0xFF10B981).copy(alpha = 0.9f)
                             isCurrent -> theme.primaryAccent.copy(alpha = 0.25f)
                             else -> theme.glassSurface
                         }
@@ -2394,7 +2461,7 @@ fun HabitTimelineRow(
                     .border(
                         1.5.dp,
                         when {
-                            item.isDone -> Color(0xFF4CAF50)
+                            item.isDone -> Color(0xFF34D399)
                             isCurrent -> theme.primaryAccent
                             else -> theme.glassBorderSubtleColor
                         },
@@ -2413,84 +2480,259 @@ fun HabitTimelineRow(
                 modifier = Modifier
                     .width(2.dp)
                     .height(40.dp)
-                    .background(theme.glassBorderSubtleColor)
+                    .background(if (item.isDone) Color(0xFF10B981).copy(alpha = 0.4f) else theme.glassBorderSubtleColor)
             )
         }
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        // Right Card
-        Card(
+        // Right Card Container with Crazy Swipe & Hold Action Layer
+        Box(
             modifier = Modifier
                 .weight(1f)
-                .padding(bottom = 8.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = if (isCurrent) theme.glassSurfaceElevated else theme.glassSurface
-            ),
-            shape = theme.cardShape,
-            border = BorderStroke(
-                theme.borderWidth,
-                if (isCurrent) theme.primaryAccent else theme.glassBorderSubtleColor
-            )
+                .padding(bottom = 8.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 12.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            // Background Action Layer (Visible during swipe)
+            val isActionActive = animatedOffset > 15f
+            if (isActionActive) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clip(theme.cardShape)
+                        .background(
+                            if (item.isDone) {
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        Color(0xFFD97706),
+                                        Color(0xFFDC2626)
+                                    )
+                                )
+                            } else {
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        Color(0xFF059669),
+                                        Color(0xFF10B981),
+                                        Color(0xFF34D399)
+                                    )
+                                )
+                            }
+                        )
+                        .padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.CenterStart
                 ) {
-                    Text(
-                        text = "${item.start}–${item.end} · ${item.getCategoryLabel()}",
-                        fontSize = 11.5.sp,
-                        fontFamily = if (theme.archetype == DesignArchetype.BENTO_BRUTALIST || theme.archetype == DesignArchetype.CYBERPUNK_HUD) FontFamily.Monospace else FontFamily.Default,
-                        color = theme.textSecondary
-                    )
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (isCurrent) {
-                            Surface(
-                                shape = theme.badgeShape,
-                                color = theme.primaryAccent.copy(alpha = 0.25f),
-                                border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.5f))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (item.isDone) {
+                            // Hold to Undo Indicator
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(alpha = 0.35f)),
+                                contentAlignment = Alignment.Center
                             ) {
+                                CircularProgressIndicator(
+                                    progress = { holdProgress },
+                                    modifier = Modifier.size(24.dp),
+                                    color = Color.White,
+                                    trackColor = Color.White.copy(alpha = 0.2f),
+                                    strokeWidth = 2.5.dp
+                                )
+                                Text("↺", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Column {
                                 Text(
-                                    text = if (theme.archetype == DesignArchetype.CYBERPUNK_HUD) "ACTIVE" else if (theme.archetype == DesignArchetype.BENTO_BRUTALIST) "CURRENT" else "Ayni vaqtda",
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
-                                    fontSize = 10.sp,
-                                    fontFamily = if (theme.archetype == DesignArchetype.BENTO_BRUTALIST || theme.archetype == DesignArchetype.CYBERPUNK_HUD) FontFamily.Monospace else FontFamily.Default,
-                                    color = theme.primaryAccent,
+                                    text = if (holdProgress >= 1f) "Qaytarildi!" else "0.5s ushlab turing...",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Vazifani bekor qilish",
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    fontSize = 10.sp
+                                )
+                            }
+                        } else {
+                            // Swipe to Complete Indicator
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.25f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("✓", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                            }
+                            Column {
+                                Text(
+                                    text = if (animatedOffset > 130f) "Qo'yib yuboring! ✓" else "O'ngga suring",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Bajarildi deb belgilash",
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    fontSize = 10.sp
                                 )
                             }
                         }
-                        if (item.blocking) {
-                            Text("🛡️", fontSize = 11.sp)
-                        }
                     }
                 }
+            }
 
-                Spacer(modifier = Modifier.height(5.dp))
-
-                Text(
-                    text = item.title,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    fontFamily = if (theme.archetype == DesignArchetype.BENTO_BRUTALIST || theme.archetype == DesignArchetype.CYBERPUNK_HUD) FontFamily.Monospace else if (theme.archetype == DesignArchetype.ZEN_ORGANIC) FontFamily.Serif else FontFamily.Default,
-                    color = theme.textPrimary,
-                    lineHeight = 20.sp
+            // Foreground Card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .offset { IntOffset(animatedOffset.toInt(), 0) }
+                    .alpha(animatedCardAlpha)
+                    .pointerInput(item.id, item.isDone) {
+                        detectHorizontalDragGestures(
+                            onDragStart = {
+                                isDragging = true
+                                holdProgress = 0f
+                            },
+                            onHorizontalDrag = { change, dragAmount ->
+                                change.consume()
+                                if (dragAmount > 0 || dragOffset > 0) {
+                                    dragOffset = (dragOffset + dragAmount).coerceIn(0f, 260f)
+                                }
+                                if (item.isDone && dragOffset >= 50f && holdJob == null && holdProgress < 1f) {
+                                    holdJob = scope.launch {
+                                        val startTime = System.currentTimeMillis()
+                                        while (System.currentTimeMillis() - startTime < 500) {
+                                            val elapsed = System.currentTimeMillis() - startTime
+                                            holdProgress = (elapsed / 500f).coerceIn(0f, 1f)
+                                            delay(16)
+                                        }
+                                        holdProgress = 1f
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onUndo(item)
+                                        delay(250)
+                                        dragOffset = 0f
+                                        isDragging = false
+                                        holdProgress = 0f
+                                        holdJob = null
+                                    }
+                                }
+                            },
+                            onDragEnd = {
+                                holdJob?.cancel()
+                                holdJob = null
+                                if (!item.isDone && dragOffset > 120f) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onComplete(item)
+                                }
+                                isDragging = false
+                                dragOffset = 0f
+                                holdProgress = 0f
+                            },
+                            onDragCancel = {
+                                holdJob?.cancel()
+                                holdJob = null
+                                isDragging = false
+                                dragOffset = 0f
+                                holdProgress = 0f
+                            }
+                        )
+                    }
+                    .clickable { onClick() },
+                colors = CardDefaults.cardColors(
+                    containerColor = when {
+                        item.isDone -> theme.glassSurface.copy(alpha = 0.5f)
+                        isCurrent -> theme.glassSurfaceElevated
+                        else -> theme.glassSurface
+                    }
+                ),
+                shape = theme.cardShape,
+                border = BorderStroke(
+                    theme.borderWidth,
+                    when {
+                        item.isDone -> Color(0xFF10B981).copy(alpha = 0.45f)
+                        isCurrent -> theme.primaryAccent
+                        else -> theme.glassBorderSubtleColor
+                    }
                 )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${item.start}–${item.end} · ${item.getCategoryLabel()}",
+                            fontSize = 11.5.sp,
+                            fontFamily = if (theme.archetype == DesignArchetype.BENTO_BRUTALIST || theme.archetype == DesignArchetype.CYBERPUNK_HUD) FontFamily.Monospace else FontFamily.Default,
+                            color = if (item.isDone) Color(0xFF10B981) else theme.textSecondary
+                        )
 
-                if (item.note.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(3.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            if (item.isDone) {
+                                Surface(
+                                    shape = theme.badgeShape,
+                                    color = Color(0xFF10B981).copy(alpha = 0.2f),
+                                    border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f))
+                                ) {
+                                    Text(
+                                        text = "BAJARILDI ✓",
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        fontSize = 9.sp,
+                                        color = Color(0xFF10B981),
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            } else if (isCurrent) {
+                                Surface(
+                                    shape = theme.badgeShape,
+                                    color = theme.primaryAccent.copy(alpha = 0.25f),
+                                    border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.5f))
+                                ) {
+                                    Text(
+                                        text = if (theme.archetype == DesignArchetype.CYBERPUNK_HUD) "ACTIVE" else if (theme.archetype == DesignArchetype.BENTO_BRUTALIST) "CURRENT" else "Ayni vaqtda",
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                        fontSize = 10.sp,
+                                        fontFamily = if (theme.archetype == DesignArchetype.BENTO_BRUTALIST || theme.archetype == DesignArchetype.CYBERPUNK_HUD) FontFamily.Monospace else FontFamily.Default,
+                                        color = theme.primaryAccent,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            if (item.blocking) {
+                                Text("🛡️", fontSize = 11.sp)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(5.dp))
+
                     Text(
-                        text = item.note,
-                        fontSize = 12.sp,
-                        color = theme.textSecondary
+                        text = item.title,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = if (theme.archetype == DesignArchetype.BENTO_BRUTALIST || theme.archetype == DesignArchetype.CYBERPUNK_HUD) FontFamily.Monospace else if (theme.archetype == DesignArchetype.ZEN_ORGANIC) FontFamily.Serif else FontFamily.Default,
+                        color = if (item.isDone) theme.textSecondary else theme.textPrimary,
+                        textDecoration = if (item.isDone) TextDecoration.LineThrough else TextDecoration.None,
+                        lineHeight = 20.sp
                     )
+
+                    if (item.note.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = item.note,
+                            fontSize = 12.sp,
+                            color = theme.textSecondary.copy(alpha = if (item.isDone) 0.6f else 1f),
+                            textDecoration = if (item.isDone) TextDecoration.LineThrough else TextDecoration.None
+                        )
+                    }
                 }
             }
         }

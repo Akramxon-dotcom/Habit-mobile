@@ -87,6 +87,10 @@ fun MonthlyEnglishPlanHomeCard(
     activeWeek: Int,
     completedTaskIds: Set<String>,
     onOpenFullPlan: () -> Unit,
+    onOpenReader: () -> Unit = {},
+    onOpenSpeakingRoom: () -> Unit = {},
+    onOpenEveningCoach: () -> Unit = {},
+    onOpenMurphy: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val theme = LocalLiquidTheme.current
@@ -201,6 +205,59 @@ fun MonthlyEnglishPlanHomeCard(
             )
 
             Spacer(modifier = Modifier.height(12.dp))
+
+            // 4 Quick Action Mega Features
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(theme.primaryAccent.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                        .border(1.dp, theme.primaryAccent.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                        .clickable { onOpenReader() }
+                        .padding(vertical = 7.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("📖 Reader", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(theme.accentSecondary.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                        .border(1.dp, theme.accentSecondary.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                        .clickable { onOpenSpeakingRoom() }
+                        .padding(vertical = 7.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("🎙️ Speaking", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(Color(0xFF10B981).copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                        .border(1.dp, Color(0xFF10B981).copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                        .clickable { onOpenEveningCoach() }
+                        .padding(vertical = 7.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("✍️ 5 Jumla", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(Color(0xFF8B5CF6).copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                        .border(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                        .clickable { onOpenMurphy() }
+                        .padding(vertical = 7.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("🧩 Murphy", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
 
             Button(
                 onClick = onOpenFullPlan,
@@ -861,8 +918,8 @@ fun MonthlyEnglishPlanDialog(
                     .fillMaxWidth()
                     .fillMaxSize(0.92f),
                 shape = RoundedCornerShape(26.dp),
-                colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
-                border = BorderStroke(1.dp, theme.glassBorderSubtle)
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F1813)),
+                border = BorderStroke(1.2.dp, theme.primaryAccent.copy(alpha = 0.4f))
             ) {
                 Column(
                     modifier = Modifier
