@@ -2,6 +2,7 @@ package com.example.ui.alarm
 
 import android.app.KeyguardManager
 import android.content.Context
+import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
@@ -35,6 +36,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -54,6 +56,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.HourglassTop
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.VolumeOff
@@ -138,6 +141,17 @@ class AlarmActivity : ComponentActivity() {
         val endTime = intent.getStringExtra(EXTRA_TASK_END) ?: ""
         val note = intent.getStringExtra(EXTRA_TASK_NOTE) ?: ""
 
+        val appUsageStatus = if (prefs.isAppUsageTrackingEnabled) {
+            com.example.service.AppUsageTracker.checkStatusForTask(this, taskTitle, taskId)
+        } else null
+        val hasUsagePermission = com.example.service.AppUsageTracker.hasUsagePermission(this)
+
+        // If task was already fulfilled by external app usage, finish immediately without alarming!
+        if (appUsageStatus != null && appUsageStatus.isFulfilled) {
+            handleAnswerDone(taskId, taskTitle, endTime)
+            return
+        }
+
         setContent {
             HabitTheme {
                 AlarmScreen(
@@ -147,6 +161,8 @@ class AlarmActivity : ComponentActivity() {
                     note = note,
                     isMuted = prefs.shouldMuteAlarm(this),
                     isAtSchool = prefs.isAtSchool || prefs.isSchoolMuted,
+                    appUsageStatus = appUsageStatus,
+                    hasUsagePermission = hasUsagePermission,
                     onStartGradualAlarm = {
                         startAlarmAudioAndVibrationGradual()
                     },
@@ -161,6 +177,18 @@ class AlarmActivity : ComponentActivity() {
                     },
                     onDismiss = {
                         handleAnswerDismiss(taskTitle, endTime)
+                    },
+                    onPunish = {
+                        handleAnswerPunish(taskId, taskTitle, category)
+                    },
+                    onOpenApp = {
+                        stopAlarmAudioAndVibration()
+                        appUsageStatus?.targetPackageName?.let { pkg ->
+                            com.example.service.AppUsageTracker.launchApp(this@AlarmActivity, pkg)
+                        }
+                    },
+                    onOpenUsageSettings = {
+                        com.example.service.AppUsageTracker.openUsageSettings(this@AlarmActivity)
                     }
                 )
             }
@@ -383,6 +411,21 @@ class AlarmActivity : ComponentActivity() {
         finishAndRemoveTask()
     }
 
+    private fun handleAnswerPunish(taskId: String, taskTitle: String, category: String) {
+        stopAlarmAudioAndVibration()
+        prefs.markAlarmAnswered(taskTitle, "")
+
+        val intent = Intent(this, com.example.MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("open_punishment", true)
+            putExtra("punishment_task_id", taskId)
+            putExtra("punishment_task_title", taskTitle)
+            putExtra("punishment_task_category", category)
+        }
+        startActivity(intent)
+        finishAndRemoveTask()
+    }
+
     override fun onDestroy() {
         stopAlarmAudioAndVibration()
         super.onDestroy()
@@ -397,11 +440,16 @@ fun AlarmScreen(
     note: String,
     isMuted: Boolean = false,
     isAtSchool: Boolean = false,
+    appUsageStatus: com.example.service.AppUsageStatus? = null,
+    hasUsagePermission: Boolean = true,
     onStartGradualAlarm: () -> Unit = {},
     onDone: () -> Unit,
     onStopRingtone: () -> Unit,
     onSnooze: (Int) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onPunish: () -> Unit = {},
+    onOpenApp: () -> Unit = {},
+    onOpenUsageSettings: () -> Unit = {}
 ) {
     var showSnoozeSelection by remember { mutableStateOf(false) }
     var selectedMinutes by remember { mutableIntStateOf(10) }
@@ -619,102 +667,444 @@ fun AlarmScreen(
 
                             Spacer(modifier = Modifier.height(16.dp))
 
-                            Text(
-                                text = "Ushbu vazifani bajardingizmi?",
-                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                                color = HabitGold.copy(alpha = 0.9f),
-                                textAlign = TextAlign.Center
-                            )
+                            if (appUsageStatus != null && appUsageStatus.isPartiallyUsed) {
+                                // 1. QISMAN FOYDALANILGAN HOLAT (masalan: 20 dan 19 daqiqasi)
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = HabitGold.copy(alpha = 0.15f),
+                                    border = BorderStroke(1.2.dp, HabitGold),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(14.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text("⚠️", fontSize = 16.sp)
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = "ME'YOR TO'LIQ BAJARILMADI!",
+                                                fontWeight = FontWeight.Bold,
+                                                color = HabitGold,
+                                                fontSize = 13.sp
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(
+                                            text = "Siz bugun «${appUsageStatus.goal.displayName}» ilovasida ${appUsageStatus.usedMinutes} daqiqa bo'lgansiz.\n" +
+                                                    "Belgilangan me'yor: ${appUsageStatus.requiredMinutes} daqiqa.\n\n" +
+                                                    "👉 Yana ${appUsageStatus.remainingMinutes} daqiqa bajarishingiz kerak!",
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                            color = Color.White,
+                                            textAlign = TextAlign.Center,
+                                            lineHeight = 18.sp
+                                        )
+                                    }
+                                }
+                            } else if (appUsageStatus != null && appUsageStatus.isNeverUsed) {
+                                // 2. TELEFONDA UMUMAN ISHLATILMAGAN HOLAT (0 daqiqa - noutbuk/boshqa telefon varianti)
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = Color(0xFF1E88E5).copy(alpha = 0.18f),
+                                    border = BorderStroke(1.2.dp, Color(0xFF64B5F6)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(14.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text("💻 📱", fontSize = 16.sp)
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = "TELEFONDA FOYDALANILMADI (0 daqiqa)",
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF90CAF9),
+                                                fontSize = 12.sp
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(
+                                            text = "Ushbu telefonda «${appUsageStatus.goal.displayName}» ilovasidan bugun foydalanilmagan.\n" +
+                                                    "Balki noutbukingizda yoki boshqa telefonda bajargandirsiz?",
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                            color = Color.White,
+                                            textAlign = TextAlign.Center,
+                                            lineHeight = 18.sp
+                                        )
+                                    }
+                                }
+                            } else {
+                                // 3. ODDIY VAZIFALAR UCHUN STANDART SO'ROV
+                                Text(
+                                    text = "Ushbu vazifani bajardingizmi?",
+                                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                                    color = HabitGold.copy(alpha = 0.9f),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+
+                            if (!hasUsagePermission && appUsageStatus != null) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color.White.copy(alpha = 0.08f),
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "⚙️ Ilova vaqtini hisoblash",
+                                            fontSize = 11.sp,
+                                            color = Color.White.copy(alpha = 0.8f)
+                                        )
+                                        TextButton(
+                                            onClick = onOpenUsageSettings,
+                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("Ruxsat berish", fontSize = 11.sp, color = HabitGold, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(32.dp))
+                    Spacer(modifier = Modifier.height(28.dp))
 
                     // Action Buttons
                     Column(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        // 1. HA / BAJARDIM BUTTON
-                        Button(
-                            onClick = {
-                                if (!isSubmitting) {
+                        if (appUsageStatus != null && appUsageStatus.isPartiallyUsed) {
+                            // --- BUTTONS FOR PARTIALLY USED ---
+                            Button(
+                                onClick = {
                                     isRingingSilenced = true
                                     onStopRingtone()
-                                    isSubmitting = true
-                                    onDone()
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(64.dp)
-                                .testTag("alarm_btn_done"),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = HabitGold,
-                                contentColor = HabitDarkBg
-                            )
-                        ) {
-                            if (isSubmitting) {
-                                CircularProgressIndicator(
-                                    color = HabitDarkBg,
-                                    modifier = Modifier.size(24.dp),
-                                    strokeWidth = 2.dp
+                                    onOpenApp()
+                                    onSnooze(appUsageStatus.remainingMinutes.coerceAtLeast(1))
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(58.dp)
+                                    .testTag("alarm_btn_open_app"),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = HabitGold,
+                                    contentColor = HabitDarkBg
                                 )
-                            } else {
+                            ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.Center
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.CheckCircle,
+                                        imageVector = Icons.Default.PlayArrow,
                                         contentDescription = null,
                                         tint = HabitDarkBg,
-                                        modifier = Modifier.size(26.dp)
+                                        modifier = Modifier.size(22.dp)
                                     )
-                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "✅ Ha, bajardim!",
+                                        text = "🚀 Ilovani ochish (yana ${appUsageStatus.remainingMinutes} daq)",
                                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                        fontSize = 18.sp
+                                        fontSize = 15.sp
                                     )
                                 }
                             }
-                        }
 
-                        // 2. YO'Q / BAJARMADIM BUTTON (Opens Snooze dialog)
-                        OutlinedButton(
-                            onClick = {
-                                isRingingSilenced = true
-                                onStopRingtone() // Stop audio so user can comfortably choose snooze duration
-                                showSnoozeSelection = true
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(58.dp)
-                                .testTag("alarm_btn_not_done"),
-                            shape = RoundedCornerShape(16.dp),
-                            border = BorderStroke(1.5.dp, HabitError),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = HabitError
-                            )
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
+                            OutlinedButton(
+                                onClick = {
+                                    if (!isSubmitting) {
+                                        isRingingSilenced = true
+                                        onStopRingtone()
+                                        isSubmitting = true
+                                        onDone()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(52.dp)
+                                    .testTag("alarm_btn_laptop_done"),
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(1.2.dp, Color(0xFF4CAF50)),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF81C784))
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.HourglassTop,
-                                    contentDescription = null,
-                                    tint = HabitError,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("💻", fontSize = 16.sp)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Qolganini noutbukda tugatdim",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        fontSize = 14.sp
+                                    )
+                                }
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    isRingingSilenced = true
+                                    onStopRingtone()
+                                    showSnoozeSelection = true
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(50.dp)
+                                    .testTag("alarm_btn_snooze"),
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(1.2.dp, Color.White.copy(alpha = 0.4f)),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                            ) {
                                 Text(
-                                    text = "⏳ Yo'q, hali bajarmadim",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                                    fontSize = 16.sp
+                                    text = "⏳ ${appUsageStatus.remainingMinutes} daqiqaga kechiktirish",
+                                    fontSize = 14.sp
                                 )
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    if (!isSubmitting) {
+                                        isSubmitting = true
+                                        onStopRingtone()
+                                        onPunish()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .testTag("alarm_btn_punish"),
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(1.2.dp, HabitError.copy(alpha = 0.7f)),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = HabitError)
+                            ) {
+                                Text("⚡ Bajarmayman (Jazo o'tash)", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                            }
+                        } else if (appUsageStatus != null && appUsageStatus.isNeverUsed) {
+                            // --- BUTTONS FOR NEVER USED (0 MIN) ---
+                            Button(
+                                onClick = {
+                                    if (!isSubmitting) {
+                                        isRingingSilenced = true
+                                        onStopRingtone()
+                                        isSubmitting = true
+                                        onDone()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(58.dp)
+                                    .testTag("alarm_btn_done_laptop"),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF2E7D32),
+                                    contentColor = Color.White
+                                )
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "✅ Ha, noutbukda/boshqa telefonda bajardim!",
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        fontSize = 14.sp
+                                    )
+                                }
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    isRingingSilenced = true
+                                    onStopRingtone()
+                                    onOpenApp()
+                                    onSnooze(appUsageStatus.requiredMinutes)
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(52.dp)
+                                    .testTag("alarm_btn_start_now"),
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(1.2.dp, HabitGold),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = HabitGold)
+                            ) {
+                                Text(
+                                    text = "🚀 Hozir ilovada boshlayman (${appUsageStatus.requiredMinutes} daqiqa)",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                    fontSize = 14.sp
+                                )
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    isRingingSilenced = true
+                                    onStopRingtone()
+                                    showSnoozeSelection = true
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(50.dp)
+                                    .testTag("alarm_btn_not_done"),
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(1.2.dp, Color.White.copy(alpha = 0.4f)),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                            ) {
+                                Text(
+                                    text = "⏳ Hali bajarmadim (Kechiktirish)",
+                                    fontSize = 14.sp
+                                )
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    if (!isSubmitting) {
+                                        isSubmitting = true
+                                        onStopRingtone()
+                                        onPunish()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .testTag("alarm_btn_punish"),
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(1.2.dp, HabitError),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = HabitError)
+                            ) {
+                                Text(
+                                    text = "⚡ Yo'q, bajarmadim (Jazo o'tash)",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                    fontSize = 13.5.sp
+                                )
+                            }
+                        } else {
+                            // --- STANDARD BUTTONS FOR OTHER TASKS ---
+                            Button(
+                                onClick = {
+                                    if (!isSubmitting) {
+                                        isRingingSilenced = true
+                                        onStopRingtone()
+                                        isSubmitting = true
+                                        onDone()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(64.dp)
+                                    .testTag("alarm_btn_done"),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = HabitGold,
+                                    contentColor = HabitDarkBg
+                                )
+                            ) {
+                                if (isSubmitting) {
+                                    CircularProgressIndicator(
+                                        color = HabitDarkBg,
+                                        modifier = Modifier.size(24.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            tint = HabitDarkBg,
+                                            modifier = Modifier.size(26.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = "✅ Ha, bajardim!",
+                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                            fontSize = 18.sp
+                                        )
+                                    }
+                                }
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    isRingingSilenced = true
+                                    onStopRingtone()
+                                    showSnoozeSelection = true
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(58.dp)
+                                    .testTag("alarm_btn_not_done"),
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(1.5.dp, HabitError),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = HabitError
+                                )
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.HourglassTop,
+                                        contentDescription = null,
+                                        tint = HabitError,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "⏳ Yo'q, hali bajarmadim",
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        fontSize = 16.sp
+                                    )
+                                }
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    if (!isSubmitting) {
+                                        isSubmitting = true
+                                        onStopRingtone()
+                                        onPunish()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(52.dp)
+                                    .testTag("alarm_btn_punish"),
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(1.5.dp, HabitError),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = HabitError
+                                )
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = null,
+                                        tint = HabitError,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "⚡ Erinchoqlikni jazolash (Murosasiz)",
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        fontSize = 14.5.sp,
+                                        color = HabitError
+                                    )
+                                }
                             }
                         }
                     }
@@ -983,6 +1373,40 @@ fun AlarmScreen(
                                     text = "⏰ Eslatmani o'rnatish ($selectedMinutes daqiqa)",
                                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                     fontSize = 16.sp
+                                )
+                            }
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                if (!isSubmitting) {
+                                    isSubmitting = true
+                                    onPunish()
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .testTag("alarm_btn_punish_snooze"),
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, HabitError.copy(alpha = 0.5f)),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = HabitError
+                            )
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = null,
+                                    tint = HabitError,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "⚡ Bajarmadim, jazo berilsin!",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = HabitError
                                 )
                             }
                         }

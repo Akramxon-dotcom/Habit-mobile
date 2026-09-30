@@ -78,6 +78,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         AlarmHelper.createNotificationChannels(this)
+        handleIntent(intent)
 
         setContent {
             val uiState by viewModel.uiState.collectAsState()
@@ -142,6 +143,9 @@ class MainActivity : ComponentActivity() {
                         onMarkTaskCompleted = { item ->
                             viewModel.markTaskCompleted(item)
                         },
+                        onMarkTaskMissedAndDisciplined = { item, type, reps ->
+                            viewModel.markTaskMissedAndDisciplined(item, type, reps)
+                        },
                         onUndoTaskCompleted = { item ->
                             viewModel.undoTaskCompleted(item)
                         },
@@ -183,6 +187,9 @@ class MainActivity : ComponentActivity() {
                         },
                         onDeleteVocabCard = { id ->
                             viewModel.deleteVocabCard(id)
+                        },
+                        onToggleVocabFavorite = { id ->
+                            viewModel.toggleVocabFavorite(id)
                         },
                         onUpdateVocabBoxLevel = { id, level ->
                             viewModel.updateVocabBoxLevel(id, level)
@@ -260,6 +267,8 @@ class MainActivity : ComponentActivity() {
                         onSaveUserGeminiApiKey = { key ->
                             viewModel.saveUserGeminiApiKey(key)
                         },
+                        onToggleNotificationsEnabled = { enabled -> viewModel.toggleNotificationsEnabled(enabled) },
+                        onToggleTaskNotificationMuted = { taskId -> viewModel.toggleTaskNotificationMuted(taskId) },
                         onToggleAlarmMute = { muted -> viewModel.toggleAlarmMute(muted) },
                         onSetAlarmVolume = { vol -> viewModel.setAlarmVolume(vol) },
                         onSetAlarmSoundTone = { tone -> viewModel.setAlarmSoundTone(tone) },
@@ -279,8 +288,43 @@ class MainActivity : ComponentActivity() {
                         onOpenSpeakingRoom = { viewModel.setSpeakingRoomOpen(true) },
                         onOpenEveningJournalCoach = { viewModel.setEveningJournalCoachOpen(true) },
                         onOpenSmartReschedule = { viewModel.setSmartRescheduleOpen(true) },
-                        onOpenMurphyGrammar = { viewModel.setMurphyGrammarOpen(true) }
+                        onOpenMurphyGrammar = { viewModel.setMurphyGrammarOpen(true) },
+                        onDismissPunishmentChamber = { viewModel.dismissPunishmentChamber() },
+                        onOpenHomeworkSheet = { viewModel.setHomeworkSheetOpen(true) },
+                        onCloseHomeworkSheet = { viewModel.setHomeworkSheetOpen(false) },
+                        onOpenHomeworkPrompt = { viewModel.setHomeworkPromptOpen(true) },
+                        onCloseHomeworkPrompt = { viewModel.dismissHomeworkPromptToday() },
+                        onSaveHomework = { topic, text -> viewModel.saveHomeworkEntry(topic, text) },
+                        onDeleteHomework = { id -> viewModel.deleteHomeworkEntry(id) },
+                        onToggleHomeworkSubTask = { entryId, subTaskId -> viewModel.toggleHomeworkSubTask(entryId, subTaskId) },
+                        onToggleHomeworkCompleted = { entryId -> viewModel.toggleHomeworkCompleted(entryId) },
+                        onSaveHomeworkPromptTime = { time -> viewModel.setHomeworkPromptTime(time) },
+                        onAddHomeworkPreset = { preset -> viewModel.addHomeworkPreset(preset) },
+                        onRemoveHomeworkPreset = { preset -> viewModel.removeHomeworkPreset(preset) },
+                        onOpenAppUsageSettings = { viewModel.setAppUsageSettingsOpen(true) },
+                        onOpenUsagePermissionSettings = { viewModel.openUsageAccessSettings() },
+                        onLaunchExternalApp = { goalId -> viewModel.openExternalAppForGoal(goalId) },
+                        onGetTaskUsageStatus = { title, id -> viewModel.getTaskUsageStatus(title, id) },
+                        onOpenScriptStudio = { viewModel.setScriptStudioOpen(true) },
+                        onOpenPictureChallenge = { viewModel.setPictureChallengeOpen(true) },
+                        onIncrementCourseraCert = { viewModel.incrementCourseraCert() },
+                        onDecrementCourseraCert = { viewModel.decrementCourseraCert() },
+                        onOpenMorningSchoolDialog = { viewModel.setMorningSchoolDialogOpen(true) }
                     )
+
+                    if (uiState.isAppUsageSettingsOpen) {
+                        com.example.ui.screen.AppUsageSettingsDialog(
+                            isEnabled = uiState.isAppUsageTrackingEnabled,
+                            ibratMinutes = uiState.ibratRequiredMinutes,
+                            cakeMinutes = uiState.cakeRequiredMinutes,
+                            hasPermission = uiState.hasUsageStatsPermission,
+                            onToggleEnabled = { viewModel.setAppUsageTrackingEnabled(it) },
+                            onUpdateIbratMinutes = { viewModel.setIbratRequiredMinutes(it) },
+                            onUpdateCakeMinutes = { viewModel.setCakeRequiredMinutes(it) },
+                            onOpenPermissionSettings = { viewModel.openUsageAccessSettings() },
+                            onDismiss = { viewModel.setAppUsageSettingsOpen(false) }
+                        )
+                    }
 
                     if (uiState.isGradedReaderOpen) {
                         com.example.ui.screen.GradedReaderScreen(
@@ -325,6 +369,32 @@ class MainActivity : ComponentActivity() {
                             onBack = { viewModel.setMurphyGrammarOpen(false) },
                             onModuleCompleted = { moduleId ->
                                 viewModel.completeMurphyGrammarModule(moduleId)
+                            }
+                        )
+                    }
+
+                    if (uiState.isScriptStudioOpen) {
+                        com.example.ui.screen.ScriptStudioScreen(
+                            onBack = { viewModel.setScriptStudioOpen(false) },
+                            savedDocuments = uiState.scriptDocuments,
+                            onSaveDocument = { doc -> viewModel.saveScriptDocument(doc) },
+                            onDeleteDocument = { id -> viewModel.deleteScriptDocument(id) }
+                        )
+                    }
+
+                    if (uiState.isPictureChallengeOpen) {
+                        com.example.ui.screen.PictureChallengeScreen(
+                            onBack = { viewModel.setPictureChallengeOpen(false) }
+                        )
+                    }
+
+                    if (uiState.isMorningSchoolDialogOpen) {
+                        com.example.ui.dialog.MorningSchoolDialog(
+                            onSelectSchoolDay = { isGoingToSchool ->
+                                viewModel.applySchoolDaySchedule(isGoingToSchool)
+                            },
+                            onDismiss = {
+                                viewModel.setMorningSchoolDialogOpen(false)
                             }
                         )
                     }
@@ -377,6 +447,22 @@ class MainActivity : ComponentActivity() {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
             Toast.makeText(this, "Bildirishnomalar avtomatik faol", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if (intent == null) return
+        if (intent.getBooleanExtra("open_punishment", false)) {
+            val taskId = intent.getStringExtra("punishment_task_id") ?: ""
+            val taskTitle = intent.getStringExtra("punishment_task_title") ?: ""
+            val taskCategory = intent.getStringExtra("punishment_task_category") ?: ""
+            viewModel.triggerPunishmentChamber(taskId, taskTitle, taskCategory)
         }
     }
 }

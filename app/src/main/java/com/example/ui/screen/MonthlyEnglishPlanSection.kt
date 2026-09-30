@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Mic
@@ -69,7 +70,10 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.DailyScheduleMapping
 import com.example.data.model.EnglishPlanTask
 import com.example.data.model.EnglishResourceItem
+import com.example.data.model.FilmSeriesPlan
 import com.example.data.model.MonthlyEnglishPlanData
+import com.example.data.model.SportWorkoutDay
+import com.example.data.model.VocabPlanDetail
 import com.example.ui.theme.HabitAmber
 import com.example.ui.theme.HabitBlue
 import com.example.ui.theme.HabitIndigo
@@ -381,36 +385,38 @@ fun LazyListScope.monthlyPlanLazyItems(
         }
     }
 
-    // 2. SUB-SECTION SELECTOR (4 Hafta / 8 Resurs / Jadval)
+    // 2. SUB-SECTION SELECTOR (4 Hafta / Aniq Sport / Filmlar / 4000 So'z / 8 Resurs / Jadval)
     item {
-        Row(
+        LazyRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(14.dp))
                 .background(theme.glassSurface)
-                .padding(3.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             val tabs = listOf(
                 "TASKS" to "🗓️ 4 Hafta",
-                "RESOURCES" to "📚 8 Resurs",
+                "SPORT" to "🏃‍♂️ Aniq Sport",
+                "FILMS" to "🎬 Aniq Filmlar",
+                "VOCAB" to "📚 4000 So'z",
+                "RESOURCES" to "📖 8 Resurs",
                 "SCHEDULE" to "📌 Kun tartibi"
             )
-            tabs.forEach { (mode, label) ->
+            items(tabs) { (mode, label) ->
                 val isSelected = selectedSubSection == mode
                 Box(
                     modifier = Modifier
-                        .weight(1f)
                         .clip(RoundedCornerShape(11.dp))
                         .background(if (isSelected) theme.primaryAccent else Color.Transparent)
                         .clickable { onSelectSubSection(mode) }
-                        .padding(vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = label,
                         color = if (isSelected) Color.Black else theme.textPrimary,
-                        fontSize = 11.5.sp,
+                        fontSize = 12.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                     )
                 }
@@ -540,6 +546,159 @@ fun LazyListScope.monthlyPlanLazyItems(
             }
         }
 
+        "SPORT" -> {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+                    border = BorderStroke(1.dp, theme.glassBorderSubtle)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "🏃‍♂️ Aniq Sport Dasturi (35 daqiqa)",
+                                color = theme.textPrimary,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Serif
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF10B981).copy(alpha = 0.15f),
+                                border = BorderStroke(0.5.dp, Color(0xFF10B981).copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = "05:15 — 05:50",
+                                    color = Color(0xFF10B981),
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Har kuni ertalab 05:15 da aniq belgilangan mashqlar: Turnik, Otjimaniya, Brus, Plank va Yugurish. Har bir mashqning to'liq texnikasi, setlari va mashg'ulot davomida quloqda eshitiladigan BBC 6 Minute English podkasti:",
+                            color = theme.textSecondary,
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+            }
+
+            items(MonthlyEnglishPlanData.SPORT_PROGRAM) { day ->
+                SportWorkoutCard(day = day)
+            }
+        }
+
+        "FILMS" -> {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+                    border = BorderStroke(1.dp, theme.glassBorderSubtle)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "🎬 Aniq Kino & Seriallar Rejasi",
+                                color = theme.textPrimary,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Serif
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = HabitPurple.copy(alpha = 0.15f),
+                                border = BorderStroke(0.5.dp, HabitPurple.copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = "17:43 — 18:40",
+                                    color = HabitPurple,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Dars bo'lmagan kunlarda soat 17:43 da 4 haftalik aniq filmlar va epizodlar. QAT'IY QOIDA: Faqat inglizcha subtitr bilan ko'ring. O'zbekcha subtitr butun samarasini yo'qotadi!",
+                            color = theme.textSecondary,
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+            }
+
+            items(MonthlyEnglishPlanData.FILM_PROGRAM) { film ->
+                FilmPlanCard(film = film)
+            }
+        }
+
+        "VOCAB" -> {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+                    border = BorderStroke(1.dp, theme.glassBorderSubtle)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "📚 4000 Essential Words & Oxford 3000",
+                                color = theme.textPrimary,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Serif
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = theme.primaryAccent.copy(alpha = 0.15f),
+                                border = BorderStroke(0.5.dp, theme.primaryAccent.copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = "04:45 — 05:15",
+                                    color = theme.primaryAccent,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Har tong 04:45 da 8 ta yangi so'z o'rganiladi va kechagi 8 ta so'z 5 daqiqada takrorlanadi. 1 oyda 200 ta eng faol so'z to'liq xotirangizga muhrlanadi va ilovaning 'Sandiq' bo'limida tekshiriladi.",
+                            color = theme.textSecondary,
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+            }
+
+            items(MonthlyEnglishPlanData.VOCAB_PROGRAM) { vocab ->
+                VocabPlanCard(vocab = vocab)
+            }
+        }
+
         "RESOURCES" -> {
             item {
                 Text(
@@ -635,6 +794,7 @@ fun PlanTaskRow(
         "serial", "kino" -> HabitPurple
         "gapirish" -> HabitRose
         "yozish" -> HabitSage
+        "sport" -> Color(0xFF10B981)
         else -> theme.primaryAccent
     }
 
@@ -646,6 +806,7 @@ fun PlanTaskRow(
         "serial", "kino" -> Icons.Default.LiveTv
         "gapirish" -> Icons.Default.Mic
         "yozish" -> Icons.Default.BookmarkBorder
+        "sport" -> Icons.Default.FitnessCenter
         else -> Icons.Default.CheckCircle
     }
 
@@ -884,6 +1045,501 @@ fun ScheduleMappingCard(mapping: DailyScheduleMapping) {
                     fontSize = 11.sp,
                     lineHeight = 15.sp
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun SportWorkoutCard(day: SportWorkoutDay) {
+    val theme = LocalLiquidTheme.current
+    var isExpanded by remember { mutableStateOf(true) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+        border = BorderStroke(1.dp, theme.glassBorderSubtle)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color(0xFF10B981).copy(alpha = 0.15f),
+                        border = BorderStroke(0.5.dp, Color(0xFF10B981).copy(alpha = 0.35f))
+                    ) {
+                        Text(
+                            text = day.daysLabel,
+                            color = Color(0xFF10B981),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = day.title,
+                        color = theme.textPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "🎯 Maqsad: ${day.focus}",
+                        color = theme.textSecondary,
+                        fontSize = 11.5.sp
+                    )
+                }
+
+                IconButton(
+                    onClick = { isExpanded = !isExpanded },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        tint = theme.textSecondary
+                    )
+                }
+            }
+
+            AnimatedVisibility(visible = isExpanded) {
+                Column(modifier = Modifier.padding(top = 12.dp)) {
+                    // Warm-up box
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = theme.glassSurface,
+                        border = BorderStroke(0.5.dp, theme.glassBorderSubtle),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(text = "🔥", fontSize = 16.sp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "Qizdirish (Warm-up)",
+                                    color = theme.primaryAccent,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = day.warmUp,
+                                    color = theme.textSecondary,
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(
+                        text = "Aniq Mashqlar (${day.exercises.size} ta):",
+                        color = theme.textPrimary,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    day.exercises.forEachIndexed { index, ex ->
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = theme.glassSurface.copy(alpha = 0.7f),
+                            border = BorderStroke(0.5.dp, theme.glassBorderSubtle),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "${index + 1}. ${ex.name}",
+                                        color = theme.textPrimary,
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color(0xFF10B981).copy(alpha = 0.15f),
+                                        border = BorderStroke(0.5.dp, Color(0xFF10B981).copy(alpha = 0.4f))
+                                    ) {
+                                        Text(
+                                            text = ex.setsAndReps,
+                                            color = Color(0xFF10B981),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                Text(
+                                    text = "💡 Texnika: ${ex.technique}",
+                                    color = theme.textSecondary,
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp
+                                )
+
+                                Spacer(modifier = Modifier.height(2.dp))
+
+                                Text(
+                                    text = "💪 Mushaklar: ${ex.targetMuscle}",
+                                    color = theme.primaryAccent,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Cool-down and Audio companion
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = theme.glassSurface,
+                        border = BorderStroke(0.5.dp, theme.glassBorderSubtle),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(text = "🧘‍♂️", fontSize = 14.sp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Mashg'ulot yakuni: ${day.coolDown}",
+                                    color = theme.textSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(text = "🎧", fontSize = 14.sp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = day.audioCompanion,
+                                    color = theme.primaryAccent,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun FilmPlanCard(film: FilmSeriesPlan) {
+    val theme = LocalLiquidTheme.current
+    var isExpanded by remember { mutableStateOf(true) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+        border = BorderStroke(1.dp, theme.glassBorderSubtle)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = HabitPurple.copy(alpha = 0.15f),
+                        border = BorderStroke(0.5.dp, HabitPurple.copy(alpha = 0.35f))
+                    ) {
+                        Text(
+                            text = "${film.weekNumber}-Hafta Filmi",
+                            color = HabitPurple,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = film.title,
+                        color = theme.textPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                IconButton(
+                    onClick = { isExpanded = !isExpanded },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        tint = theme.textSecondary
+                    )
+                }
+            }
+
+            AnimatedVisibility(visible = isExpanded) {
+                Column(modifier = Modifier.padding(top = 10.dp)) {
+                    // Episodes
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = theme.glassSurface,
+                        border = BorderStroke(0.5.dp, theme.glassBorderSubtle),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = "🎬 Epizodlar / Qismlar:",
+                                color = theme.primaryAccent,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = film.episodes,
+                                color = theme.textPrimary,
+                                fontSize = 11.5.sp,
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = theme.glassSurface,
+                        border = BorderStroke(0.5.dp, theme.glassBorderSubtle),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = "🔍 Qayerdan ko'rish mumkin:",
+                                color = HabitAmber,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = film.platform,
+                                color = theme.textSecondary,
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = theme.glassSurface,
+                        border = BorderStroke(0.5.dp, theme.glassBorderSubtle),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = "💡 Nega aynan shu film:",
+                                color = theme.textPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = film.whyThisChoice,
+                                color = theme.textSecondary,
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp
+                            )
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Text(
+                                text = "🎯 Kunlik amaliy vazifa:",
+                                color = theme.primaryAccent,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = film.taskForToday,
+                                color = theme.textPrimary,
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun VocabPlanCard(vocab: VocabPlanDetail) {
+    val theme = LocalLiquidTheme.current
+    var isExpanded by remember { mutableStateOf(true) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+        border = BorderStroke(1.dp, theme.glassBorderSubtle)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = theme.primaryAccent.copy(alpha = 0.15f),
+                        border = BorderStroke(0.5.dp, theme.primaryAccent.copy(alpha = 0.35f))
+                    ) {
+                        Text(
+                            text = "${vocab.weekNumber}-Hafta: ${vocab.targetWordsCount}",
+                            color = theme.primaryAccent,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = vocab.sourceBook,
+                        color = theme.textPrimary,
+                        fontSize = 14.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                IconButton(
+                    onClick = { isExpanded = !isExpanded },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        tint = theme.textSecondary
+                    )
+                }
+            }
+
+            AnimatedVisibility(visible = isExpanded) {
+                Column(modifier = Modifier.padding(top = 10.dp)) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = theme.glassSurface,
+                        border = BorderStroke(0.5.dp, theme.glassBorderSubtle),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(text = "⏰", fontSize = 15.sp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = vocab.dailyQuota,
+                                color = theme.textPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(
+                        text = "Ushbu haftadagi namunaviy so'zlar:",
+                        color = theme.textPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Words list chips
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        vocab.keyWordsSample.chunked(2).forEach { pair ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                pair.forEach { word ->
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = theme.glassSurface,
+                                        border = BorderStroke(0.5.dp, theme.glassBorderSubtle),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            text = word,
+                                            color = theme.textPrimary,
+                                            fontSize = 10.5.sp,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                                        )
+                                    }
+                                }
+                                if (pair.size == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = theme.glassSurface,
+                        border = BorderStroke(0.5.dp, theme.glassBorderSubtle),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = "🧠 Yodda saqlash siri:",
+                                color = theme.primaryAccent,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = vocab.retentionMethod,
+                                color = theme.textSecondary,
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp
+                            )
+                        }
+                    }
+                }
             }
         }
     }

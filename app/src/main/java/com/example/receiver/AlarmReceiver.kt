@@ -29,14 +29,41 @@ class AlarmReceiver : BroadcastReceiver() {
             val note = intent.getStringExtra(AlarmActivity.EXTRA_TASK_NOTE) ?: ""
             val taskId = intent.getStringExtra(AlarmActivity.EXTRA_TASK_ID) ?: ""
 
-            AlarmRingtoneService.startAlarm(
-                context = context,
-                title = title,
-                category = category,
-                end = endTime,
-                note = note,
-                taskId = taskId
-            )
+            val prefs = com.example.data.local.HabitPreferences(context)
+
+            // Check if this task is linked to an external app (Ibrat / Cake) and already fulfilled today
+            if (prefs.isAppUsageTrackingEnabled) {
+                val usageStatus = com.example.service.AppUsageTracker.checkStatusForTask(context, title, taskId)
+                if (usageStatus != null && usageStatus.isFulfilled) {
+                    Log.d(TAG, "Task «$title» was already fulfilled via app usage (${usageStatus.usedMinutes}/${usageStatus.requiredMinutes} min). Marking done automatically without alarm!")
+                    prefs.markTaskCompletedByTitleOrId(taskId, title, endTime)
+                    prefs.markAlarmAnswered(title, endTime)
+                    com.example.service.AppUsageTracker.showAutoCompletedNotification(
+                        context = context,
+                        taskTitle = title,
+                        usedMinutes = usageStatus.usedMinutes,
+                        requiredMinutes = usageStatus.requiredMinutes
+                    )
+                    try {
+                        com.example.widget.HabitAppWidgetProvider.updateAllWidgets(context)
+                        com.example.service.HabitNotificationHelper.showActiveTaskNotification(context)
+                    } catch (_: Exception) {}
+                    return
+                }
+            }
+
+            if (prefs.isNotificationsEnabled && !prefs.isTaskNotificationMuted(taskId)) {
+                AlarmRingtoneService.startAlarm(
+                    context = context,
+                    title = title,
+                    category = category,
+                    end = endTime,
+                    note = note,
+                    taskId = taskId
+                )
+            } else {
+                Log.d(TAG, "Bildirishnoma o'chirilgan (isNotificationsEnabled=${prefs.isNotificationsEnabled}, isTaskMuted=${prefs.isTaskNotificationMuted(taskId)})")
+            }
         }
 
         // Always refresh Widget, Notification, and AI Wallpaper when task transitions occur

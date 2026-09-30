@@ -147,6 +147,8 @@ data class HabitUiState(
     val userGeminiApiKey: String = "",
 
     // Alarm Sound & Volume
+    val isNotificationsEnabled: Boolean = true,
+    val mutedTaskNotificationIds: Set<String> = emptySet(),
     val isAlarmMuted: Boolean = false,
     val isAtSchool: Boolean = false,
     val isSchoolMuted: Boolean = false,
@@ -169,7 +171,36 @@ data class HabitUiState(
     val isSpeakingRoomOpen: Boolean = false,
     val isEveningJournalCoachOpen: Boolean = false,
     val isSmartRescheduleOpen: Boolean = false,
-    val isMurphyGrammarOpen: Boolean = false
+    val isMurphyGrammarOpen: Boolean = false,
+    val isScriptStudioOpen: Boolean = false,
+    val isPictureChallengeOpen: Boolean = false,
+    val scriptDocuments: List<com.example.data.model.ScriptDocument> = emptyList(),
+
+    // Homework (Uyga vazifalar)
+    val homeworkPromptTime: String = "17:00",
+    val homeworkPresets: List<String> = emptyList(),
+    val homeworkHistory: List<com.example.data.model.HomeworkEntry> = emptyList(),
+    val todayHomework: com.example.data.model.HomeworkEntry? = null,
+    val isHomeworkPromptOpen: Boolean = false,
+    val isHomeworkSheetOpen: Boolean = false,
+    val isHomeworkTimePickerOpen: Boolean = false,
+
+    // Punishment chamber target
+    val activePunishmentItem: ScheduleItem? = null,
+
+    // External App Usage Tracking (Ibrat & Cake)
+    val isAppUsageTrackingEnabled: Boolean = true,
+    val ibratRequiredMinutes: Int = 20,
+    val cakeRequiredMinutes: Int = 20,
+    val hasUsageStatsPermission: Boolean = false,
+    val isAppUsageSettingsOpen: Boolean = false,
+
+    // Aileaders.uz Coursera 5 Million & Morning School State
+    val courseraCertsDoneToday: Int = 0,
+    val courseraTargetDaily: Int = 50,
+    val courseraPricePerCert: Int = 5000,
+    val isSchoolDay: Boolean = true,
+    val isMorningSchoolDialogOpen: Boolean = false
 )
 
 class HabitViewModel(application: Application) : AndroidViewModel(application) {
@@ -290,6 +321,11 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
         val nextPr = com.example.data.model.PrayerTimeEngine.getNextPrayer()
         val hijri = com.example.data.model.PrayerTimeEngine.getHijriDateFormatted()
 
+        val promptTimeStr = prefs.getHomeworkPromptTime()
+        val curMinute = TaskTimeEngine.getCurrentMinuteOfDay()
+        val promptMin = TaskTimeEngine.parseMinuteOfDay(promptTimeStr) ?: (17 * 60)
+        val shouldAutoPrompt = curMinute >= promptMin && !prefs.hasPromptedHomeworkToday() && !_uiState.value.isHomeworkPromptOpen
+
         _uiState.update {
             it.copy(
                 habitState = effectiveHabit,
@@ -308,9 +344,16 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
                 isLate = isLate,
                 nextPrayer = nextPr,
                 hijriDate = hijri,
+                isNotificationsEnabled = prefs.isNotificationsEnabled,
+                mutedTaskNotificationIds = prefs.getMutedTaskNotificationIds(),
                 isAlarmMuted = prefs.isAlarmMuted,
                 isAtSchool = prefs.isAtSchool,
-                isSchoolMuted = prefs.isSchoolMuted
+                isSchoolMuted = prefs.isSchoolMuted,
+                homeworkPromptTime = promptTimeStr,
+                isHomeworkPromptOpen = if (shouldAutoPrompt) true else it.isHomeworkPromptOpen,
+                todayHomework = prefs.getTodayHomework(),
+                homeworkHistory = prefs.getHomeworkEntries(),
+                homeworkPresets = prefs.getHomeworkPresets()
             )
         }
     }
@@ -378,6 +421,8 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
                 customLocations = prefs.getCustomLocations(),
                 isBlockerPaused = prefs.isBlockerPaused,
                 userGeminiApiKey = prefs.userGeminiApiKey,
+                isNotificationsEnabled = prefs.isNotificationsEnabled,
+                mutedTaskNotificationIds = prefs.getMutedTaskNotificationIds(),
                 isAlarmMuted = prefs.isAlarmMuted,
                 isAtSchool = prefs.isAtSchool,
                 isSchoolMuted = prefs.isSchoolMuted,
@@ -388,11 +433,25 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
                 isQuizPassedToday = prefs.isQuizPassedToday(),
                 quizFailedWordIds = prefs.getQuizFailedWordIds(),
                 activeEnglishPlanWeek = prefs.getActiveEnglishPlanWeek(),
-                completedEnglishPlanTaskIds = prefs.getCompletedEnglishPlanTaskIds()
+                completedEnglishPlanTaskIds = prefs.getCompletedEnglishPlanTaskIds(),
+                homeworkPromptTime = prefs.getHomeworkPromptTime(),
+                homeworkPresets = prefs.getHomeworkPresets(),
+                homeworkHistory = prefs.getHomeworkEntries(),
+                todayHomework = prefs.getTodayHomework(),
+                isAppUsageTrackingEnabled = prefs.isAppUsageTrackingEnabled,
+                ibratRequiredMinutes = prefs.ibratRequiredMinutes,
+                cakeRequiredMinutes = prefs.cakeRequiredMinutes,
+                hasUsageStatsPermission = com.example.service.AppUsageTracker.hasUsagePermission(getApplication()),
+                scriptDocuments = prefs.getScriptDocuments(),
+                courseraCertsDoneToday = prefs.getCourseraCertsDoneToday(),
+                courseraTargetDaily = prefs.getCourseraTargetDaily(),
+                isSchoolDay = prefs.getIsSchoolDay(),
+                isMorningSchoolDialogOpen = prefs.shouldShowMorningSchoolPrompt()
             )
         }
         refreshWeather()
         initOrRefreshTodayVocabBatch()
+        checkAppUsageAutoCompletion()
         // Update widget, notification and alarms on load
         com.example.widget.HabitAppWidgetProvider.updateAllWidgets(getApplication())
         com.example.service.HabitNotificationHelper.showActiveTaskNotification(getApplication())
@@ -482,6 +541,21 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
         triggerSystemVisualSync()
     }
 
+    fun markTaskMissedAndDisciplined(item: ScheduleItem, type: com.example.data.discipline.PunishmentType, amountDone: Int) {
+        val updated = prefs.getSchedule().map {
+            if (it.id == item.id || it.title.trim().equals(item.title.trim(), ignoreCase = true)) {
+                it.copy(isMissed = true, isDone = false)
+            } else it
+        }
+        prefs.saveSchedule(updated)
+        prefs.recordPunishmentCompleted(type, amountDone)
+        updateRealtimeMetrics()
+        triggerSystemVisualSync()
+        viewModelScope.launch {
+            _userMessage.emit("💪 Jazo sharaf bilan bajarildi: $amountDone ${type.unit} ${type.title}!")
+        }
+    }
+
     fun delaySchedule(minutes: Int) {
         val currentItems = prefs.getSchedule()
         val nowMin = TaskTimeEngine.getCurrentMinuteOfDay()
@@ -524,6 +598,26 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setSmartAddOpen(open: Boolean) {
         _uiState.update { it.copy(isSmartAddOpen = open) }
+    }
+
+    fun triggerPunishmentChamber(item: ScheduleItem) {
+        _uiState.update { it.copy(activePunishmentItem = item) }
+    }
+
+    fun triggerPunishmentChamber(taskId: String, taskTitle: String, category: String) {
+        val schedule = prefs.getSchedule()
+        val foundItem = schedule.firstOrNull { it.id == taskId }
+            ?: schedule.firstOrNull { it.title.trim().equals(taskTitle.trim(), ignoreCase = true) }
+            ?: ScheduleItem(
+                id = taskId.ifBlank { System.currentTimeMillis().toString() },
+                title = taskTitle.ifBlank { "Vazifa" },
+                category = category.ifBlank { "general" }
+            )
+        _uiState.update { it.copy(activePunishmentItem = foundItem) }
+    }
+
+    fun dismissPunishmentChamber() {
+        _uiState.update { it.copy(activePunishmentItem = null) }
     }
 
     fun setQiblaOpen(open: Boolean) {
@@ -599,13 +693,7 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update { it.copy(isLoading = true) }
             _userMessage.emit("🤖 Gemini AI namoz vaqtlari bo'yicha jadvalni qayta rejalashtirmoqda...")
             val currentTasks = prefs.getSchedule()
-            val prayers = mapOf(
-                "fajr" to "04:45",
-                "dhuhr" to "12:35",
-                "asr" to "16:45",
-                "maghrib" to "18:50",
-                "isha" to "20:20"
-            )
+            val prayers = com.example.data.model.PrayerTimeEngine.getMargilonPrayers().associate { it.id to it.time }
             val result = com.example.data.remote.GeminiClient.replanSchedule(currentTasks, prayers)
             _uiState.update { it.copy(isLoading = false) }
             result.onSuccess { replanList ->
@@ -1130,7 +1218,36 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // --- Alarm Sound & Volume Controls ---
+    // --- Notification & Alarm Sound Controls ---
+    fun toggleNotificationsEnabled(enabled: Boolean) {
+        prefs.isNotificationsEnabled = enabled
+        _uiState.update { it.copy(isNotificationsEnabled = enabled) }
+        if (!enabled) {
+            com.example.service.HabitNotificationHelper.cancelNotification(getApplication())
+        } else {
+            com.example.service.HabitNotificationHelper.showActiveTaskNotification(getApplication())
+        }
+        viewModelScope.launch {
+            _userMessage.emit(
+                if (enabled) "🔔 Bildirishnomalar yoqildi"
+                else "🔕 Barcha bildirishnomalar o'chirildi"
+            )
+        }
+    }
+
+    fun toggleTaskNotificationMuted(taskId: String) {
+        val willBeMuted = prefs.toggleTaskNotificationMuted(taskId)
+        val updatedSet = prefs.getMutedTaskNotificationIds()
+        _uiState.update { it.copy(mutedTaskNotificationIds = updatedSet) }
+        com.example.service.HabitNotificationHelper.showActiveTaskNotification(getApplication())
+        viewModelScope.launch {
+            _userMessage.emit(
+                if (willBeMuted) "🔕 Ushbu vazifa uchun bildirishnoma o'chirildi"
+                else "🔔 Ushbu vazifa uchun bildirishnoma yoqildi"
+            )
+        }
+    }
+
     fun toggleAlarmMute(muted: Boolean) {
         prefs.isAlarmMuted = muted
         _uiState.update { it.copy(isAlarmMuted = muted) }
@@ -1466,6 +1583,18 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
         prefs.saveVocabCards(updated)
         _uiState.update { it.copy(vocabCards = updated) }
         viewModelScope.launch { _userMessage.emit("So'z o'chirildi") }
+    }
+
+    fun toggleVocabFavorite(id: String) {
+        val updatedCards = prefs.getVocabCards().map {
+            if (it.id == id) it.copy(isFavorite = !it.isFavorite) else it
+        }
+        prefs.saveVocabCards(updatedCards)
+        _uiState.update { it.copy(vocabCards = updatedCards) }
+        viewModelScope.launch {
+            val isFav = updatedCards.find { it.id == id }?.isFavorite == true
+            _userMessage.emit(if (isFav) "⭐ Sevimlilar (Favorite) ro'yxatiga qo'shildi!" else "Sevimlilardan olib tashlandi")
+        }
     }
 
     fun updateVocabBoxLevel(id: String, newLevel: Int) {
@@ -1912,6 +2041,104 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(isMurphyGrammarOpen = isOpen) }
     }
 
+    fun setScriptStudioOpen(isOpen: Boolean) {
+        _uiState.update { it.copy(isScriptStudioOpen = isOpen) }
+    }
+
+    fun setPictureChallengeOpen(isOpen: Boolean) {
+        _uiState.update { it.copy(isPictureChallengeOpen = isOpen) }
+    }
+
+    // --- Aileaders.uz Coursera & Morning School Actions ---
+    fun setMorningSchoolDialogOpen(isOpen: Boolean) {
+        _uiState.update { it.copy(isMorningSchoolDialogOpen = isOpen) }
+    }
+
+    fun applySchoolDaySchedule(isGoingToSchool: Boolean) {
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+        prefs.setIsSchoolDay(isGoingToSchool)
+        prefs.setLastMorningPromptDate(today)
+
+        val newSchedule = if (isGoingToSchool) {
+            com.example.data.model.MorningSchoolScheduleEngine.getSchoolDayPlan()
+        } else {
+            com.example.data.model.MorningSchoolScheduleEngine.getNoSchoolDayPlan()
+        }
+
+        prefs.saveSchedule(newSchedule)
+        _uiState.update {
+            it.copy(
+                scheduleItems = newSchedule,
+                isSchoolDay = isGoingToSchool,
+                isMorningSchoolDialogOpen = false
+            )
+        }
+        com.example.alarm.AlarmHelper.scheduleAllTasksForToday(getApplication(), newSchedule)
+        com.example.widget.HabitAppWidgetProvider.updateAllWidgets(getApplication())
+        viewModelScope.launch {
+            _userMessage.emit(
+                if (isGoingToSchool)
+                    "🏫 Maktab kuni jadvali saqlandi: 45-50 ta Coursera sertifikati + 5 vaqt Namoz + Offline Ingliz tili!"
+                else
+                    "🏠 Turbo Coursera kuni jadvali saqlandi: 50+ sertifikat (250,000+ so'm) + 5 vaqt Namoz + Offline dars!"
+            )
+        }
+    }
+
+    fun applyAiCustomSchedule(customItems: List<com.example.data.model.ScheduleItem>, isSchool: Boolean) {
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+        prefs.setIsSchoolDay(isSchool)
+        prefs.setLastMorningPromptDate(today)
+        prefs.saveSchedule(customItems)
+        _uiState.update {
+            it.copy(
+                scheduleItems = customItems,
+                isSchoolDay = isSchool,
+                isMorningSchoolDialogOpen = false
+            )
+        }
+        com.example.alarm.AlarmHelper.scheduleAllTasksForToday(getApplication(), customItems)
+        com.example.widget.HabitAppWidgetProvider.updateAllWidgets(getApplication())
+        viewModelScope.launch {
+            _userMessage.emit("✨ Gemini AI maxsus kun tartibi muvaffaqiyatli tatbiq etildi!")
+        }
+    }
+
+    fun incrementCourseraCert() {
+        val current = _uiState.value.courseraCertsDoneToday + 1
+        prefs.setCourseraCertsDoneToday(current)
+        _uiState.update { it.copy(courseraCertsDoneToday = current) }
+        viewModelScope.launch {
+            val earned = current * _uiState.value.courseraPricePerCert
+            _userMessage.emit("🎉 +1 Sertifikat olindi! Jami: $current ta (${String.format("%,d", earned)} so'm)")
+        }
+    }
+
+    fun decrementCourseraCert() {
+        val current = (_uiState.value.courseraCertsDoneToday - 1).coerceAtLeast(0)
+        prefs.setCourseraCertsDoneToday(current)
+        _uiState.update { it.copy(courseraCertsDoneToday = current) }
+    }
+
+    fun setCourseraTarget(target: Int) {
+        prefs.setCourseraTargetDaily(target)
+        _uiState.update { it.copy(courseraTargetDaily = target) }
+    }
+
+    fun saveScriptDocument(doc: com.example.data.model.ScriptDocument) {
+        prefs.saveScriptDocument(doc)
+        val updated = prefs.getScriptDocuments()
+        _uiState.update { it.copy(scriptDocuments = updated) }
+        viewModelScope.launch { _userMessage.emit("💾 Script saqlandi!") }
+    }
+
+    fun deleteScriptDocument(id: String) {
+        prefs.deleteScriptDocument(id)
+        val updated = prefs.getScriptDocuments()
+        _uiState.update { it.copy(scriptDocuments = updated) }
+        viewModelScope.launch { _userMessage.emit("🗑️ Script o'chirildi") }
+    }
+
     fun addWordFromReaderToVault(word: String, uzbek: String, pos: String) {
         val newCard = com.example.data.model.VocabCard(
             word = word,
@@ -1955,5 +2182,199 @@ class HabitViewModel(application: Application) : AndroidViewModel(application) {
     fun completeReaderChapter(bookTitle: String, chapterTitle: String) {
         toggleEnglishPlanTask("w1_reading")
         viewModelScope.launch { _userMessage.emit("📖 '$bookTitle' kitobining $chapterTitle o'qib tugatildi! (+40 XP)") }
+    }
+
+    // =========================================================
+    // HOMEWORK (UYGA VAZIFALAR) ACTIONS
+    // =========================================================
+
+    fun setHomeworkPromptOpen(isOpen: Boolean) {
+        _uiState.update { it.copy(isHomeworkPromptOpen = isOpen) }
+        if (!isOpen) {
+            prefs.setHomeworkPromptAnsweredToday(true)
+        }
+    }
+
+    fun dismissHomeworkPromptToday() {
+        prefs.setHomeworkPromptAnsweredToday(true)
+        _uiState.update { it.copy(isHomeworkPromptOpen = false) }
+    }
+
+    fun setHomeworkSheetOpen(isOpen: Boolean) {
+        _uiState.update {
+            it.copy(
+                isHomeworkSheetOpen = isOpen,
+                todayHomework = prefs.getTodayHomework(),
+                homeworkHistory = prefs.getHomeworkEntries(),
+                homeworkPresets = prefs.getHomeworkPresets()
+            )
+        }
+    }
+
+    fun setHomeworkPromptTime(time: String) {
+        prefs.setHomeworkPromptTime(time)
+        _uiState.update { it.copy(homeworkPromptTime = prefs.getHomeworkPromptTime()) }
+        viewModelScope.launch {
+            _userMessage.emit("Uyga vazifalar so'rov vaqti soat $time ga belgilandi ⏰")
+        }
+    }
+
+    fun saveHomeworkEntry(topic: String, rawText: String) {
+        val lines = rawText.lines().map { it.trim() }.filter { it.isNotBlank() }
+        val subTasks = lines.map { line ->
+            val clean = line.replace(Regex("""^(\d+[\.\)]\s*|[-*•]\s*)"""), "")
+            com.example.data.model.HomeworkSubTask(
+                text = clean.ifBlank { line },
+                isDone = false
+            )
+        }
+        val existingToday = prefs.getTodayHomework()
+        val entry = com.example.data.model.HomeworkEntry(
+            id = existingToday?.id ?: java.util.UUID.randomUUID().toString(),
+            dateStr = prefs.getTodayDateString(),
+            topic = topic.trim(),
+            rawText = rawText.trim(),
+            tasks = if (subTasks.isNotEmpty()) subTasks else listOf(com.example.data.model.HomeworkSubTask(text = rawText.trim())),
+            isCompleted = false,
+            createdAtEpochMs = System.currentTimeMillis()
+        )
+        prefs.saveHomeworkEntry(entry)
+        prefs.setHomeworkPromptAnsweredToday(true)
+        _uiState.update {
+            it.copy(
+                todayHomework = entry,
+                homeworkHistory = prefs.getHomeworkEntries(),
+                isHomeworkPromptOpen = false
+            )
+        }
+        viewModelScope.launch {
+            _userMessage.emit("Bugungi uyga vazifalar muvaffaqiyatli saqlandi! 🎯")
+        }
+    }
+
+    fun deleteHomeworkEntry(id: String) {
+        prefs.deleteHomeworkEntry(id)
+        _uiState.update {
+            it.copy(
+                todayHomework = prefs.getTodayHomework(),
+                homeworkHistory = prefs.getHomeworkEntries()
+            )
+        }
+        viewModelScope.launch {
+            _userMessage.emit("Vazifa o'chirildi")
+        }
+    }
+
+    fun toggleHomeworkSubTask(entryId: String, subTaskId: String) {
+        prefs.toggleHomeworkSubTask(entryId, subTaskId)
+        _uiState.update {
+            it.copy(
+                todayHomework = prefs.getTodayHomework(),
+                homeworkHistory = prefs.getHomeworkEntries()
+            )
+        }
+    }
+
+    fun toggleHomeworkCompleted(entryId: String) {
+        prefs.toggleHomeworkCompleted(entryId)
+        _uiState.update {
+            it.copy(
+                todayHomework = prefs.getTodayHomework(),
+                homeworkHistory = prefs.getHomeworkEntries()
+            )
+        }
+    }
+
+    fun addHomeworkPreset(preset: String) {
+        val updated = prefs.addHomeworkPreset(preset)
+        _uiState.update { it.copy(homeworkPresets = updated) }
+    }
+
+    fun removeHomeworkPreset(preset: String) {
+        val updated = prefs.removeHomeworkPreset(preset)
+        _uiState.update { it.copy(homeworkPresets = updated) }
+    }
+
+    // --- External App Usage Tracking (Ibrat & Cake) ---
+    fun checkAppUsageAutoCompletion() {
+        if (!prefs.isAppUsageTrackingEnabled) return
+        val context = getApplication<Application>()
+        if (!com.example.service.AppUsageTracker.hasUsagePermission(context)) return
+
+        val scheduleList = prefs.getSchedule()
+        var hasChanges = false
+        val updatedList = scheduleList.map { item ->
+            if (!item.isDone) {
+                val status = com.example.service.AppUsageTracker.checkStatusForTask(context, item.title, item.id)
+                if (status != null && status.isFulfilled) {
+                    prefs.markTaskCompletedByTitleOrId(item.id, item.title, item.end)
+                    hasChanges = true
+                    viewModelScope.launch {
+                        _userMessage.emit("🎉 «${item.title}» bugun ilovada ${status.usedMinutes} daqiqa bo'lganingiz uchun avtomatik bajarildi deb belgilandi!")
+                    }
+                    item.copy(isDone = true)
+                } else {
+                    item
+                }
+            } else {
+                item
+            }
+        }
+
+        if (hasChanges) {
+            _uiState.update { it.copy(scheduleItems = updatedList) }
+            com.example.widget.HabitAppWidgetProvider.updateAllWidgets(context)
+            com.example.service.HabitNotificationHelper.showActiveTaskNotification(context)
+        }
+    }
+
+    fun setAppUsageTrackingEnabled(enabled: Boolean) {
+        prefs.isAppUsageTrackingEnabled = enabled
+        _uiState.update { it.copy(isAppUsageTrackingEnabled = enabled) }
+        if (enabled) {
+            checkAppUsageAutoCompletion()
+        }
+    }
+
+    fun setIbratRequiredMinutes(minutes: Int) {
+        val valid = minutes.coerceIn(5, 180)
+        prefs.ibratRequiredMinutes = valid
+        _uiState.update { it.copy(ibratRequiredMinutes = valid) }
+        checkAppUsageAutoCompletion()
+    }
+
+    fun setCakeRequiredMinutes(minutes: Int) {
+        val valid = minutes.coerceIn(5, 180)
+        prefs.cakeRequiredMinutes = valid
+        _uiState.update { it.copy(cakeRequiredMinutes = valid) }
+        checkAppUsageAutoCompletion()
+    }
+
+    fun setAppUsageSettingsOpen(open: Boolean) {
+        val hasPermission = com.example.service.AppUsageTracker.hasUsagePermission(getApplication())
+        _uiState.update {
+            it.copy(
+                isAppUsageSettingsOpen = open,
+                hasUsageStatsPermission = hasPermission
+            )
+        }
+        if (!open) {
+            checkAppUsageAutoCompletion()
+        }
+    }
+
+    fun openExternalAppForGoal(goalId: String) {
+        val goal = com.example.service.AppUsageTracker.ALL_GOALS.firstOrNull { it.id == goalId } ?: return
+        val targetPackage = com.example.service.AppUsageTracker.findInstalledPackageForGoal(getApplication(), goal)
+        com.example.service.AppUsageTracker.launchApp(getApplication(), targetPackage)
+    }
+
+    fun openUsageAccessSettings() {
+        com.example.service.AppUsageTracker.openUsageSettings(getApplication())
+    }
+
+    fun getTaskUsageStatus(taskTitle: String, taskId: String): com.example.service.AppUsageStatus? {
+        val context = getApplication<Application>()
+        return com.example.service.AppUsageTracker.checkStatusForTask(context, taskTitle, taskId)
     }
 }

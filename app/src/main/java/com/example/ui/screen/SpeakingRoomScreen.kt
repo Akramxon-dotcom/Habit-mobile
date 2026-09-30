@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package com.example.ui.screen
 
 import android.Manifest
@@ -47,6 +49,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -304,6 +308,8 @@ fun SpeakingRoomScreen(
 
     var selectedScenarioIndex by remember { mutableIntStateOf(0) }
     val currentScenario = SpeakingScenarios.ALL[selectedScenarioIndex]
+    var activeSubMode by remember { mutableStateOf(SpeakingSubMode.CHAT) }
+    var selectedModel by remember { mutableStateOf(GeminiClient.MODEL_TEXT_PRIMARY) }
 
     var messages by remember {
         mutableStateOf(
@@ -323,6 +329,13 @@ fun SpeakingRoomScreen(
     var isLiveModeActive by remember { mutableStateOf(false) }
     var userStatusNotice by remember { mutableStateOf<String?>(null) }
     var shadowingMatchScore by remember { mutableStateOf<Pair<String, Int>?>(null) }
+
+    // Triple-tap Word Intelligence & Essential Vault states
+    var inspectedWord by remember { mutableStateOf<String?>(null) }
+    var inspectedContext by remember { mutableStateOf("") }
+    var inspectedSourceMode by remember { mutableStateOf("Speaking") }
+    var showVaultDialog by remember { mutableStateOf(false) }
+    val prefs = remember { com.example.data.local.HabitPreferences(context) }
 
     val isListening by speechManager.isListening.collectAsState()
     val isSpeaking by speechManager.isSpeaking.collectAsState()
@@ -442,25 +455,38 @@ fun SpeakingRoomScreen(
 
         isAiGenerating = true
         scope.launch {
-            val history = messages.takeLast(6).joinToString("\n") { "${it.sender}: ${it.text}" }
-            val prompt = """
-                You are an expert, encouraging A2 Elementary English speaking mentor conversing with Akramjon.
+            val historyPairs = messages.takeLast(10).map { 
+                Pair(if (it.sender == "USER") "user" else "model", it.text) 
+            }
+            val systemPrompt = """
+                You are an expert, encouraging English speaking mentor conversing with Akramjon.
                 Topic context: ${currentScenario.title}.
                 Scenario details: ${currentScenario.systemPrompt}
-                Conversation history:
-                $history
-                User just said: "$trimmed"
-                
                 CRITICAL INSTRUCTIONS:
-                1. NEVER output JSON, category, or schedule formats.
-                2. Akramjon may speak English OR Uzbek. If he speaks Uzbek, understand his intention, respond in simple conversational A2 English (2-3 sentences), and in [FEEDBACK_UZ] explain how to say that properly in English!
-                3. Always reply in this exact 3-part format:
-                [RESPONSE]: (Your next conversational reply in friendly 2-3 sentence A2 English)
-                [FEEDBACK_UZ]: (Short feedback in Uzbek about grammar, pronunciation or how to say it in English)
-                [SHADOWING]: (1 natural, useful English sentence from your reply for the user to repeat aloud)
+                1. NEVER output JSON or markdown code blocks.
+                2. Reply in this exact 3-part format:
+                [RESPONSE]: (Friendly conversational reply in natural English, 2-3 sentences)
+                [FEEDBACK_UZ]: (Short tip in Uzbek about vocabulary, grammar or pronunciation)
+                [SHADOWING]: (1 useful sentence from your reply to repeat aloud)
             """.trimIndent()
 
-            val rawResult = GeminiClient.generateText(prompt, context).getOrNull() ?: ""
+            val rawResult = if (selectedModel == GeminiClient.MODEL_LIVE) {
+                val liveRes = GeminiClient.liveVoiceConversation(
+                    userText = trimmed,
+                    history = historyPairs,
+                    systemInstruction = systemPrompt,
+                    context = context
+                )
+                liveRes.getOrNull()?.text ?: ""
+            } else {
+                GeminiClient.chatMultiTurn(
+                    history = historyPairs,
+                    userMessage = trimmed,
+                    systemInstruction = systemPrompt,
+                    modelName = selectedModel,
+                    context = context
+                ).getOrNull() ?: ""
+            }
 
             // Strict sanitization - eliminate any JSON leak from old cached calls or quota limits
             val aiResult = if (rawResult.isBlank() || rawResult.contains("quota", ignoreCase = true) || rawResult.contains("RESOURCE_EXHAUSTED", ignoreCase = true) || rawResult.contains("{\"category") || rawResult.contains("\"start\":") || rawResult.contains("\"placement\":")) {
@@ -545,12 +571,12 @@ fun SpeakingRoomScreen(
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                "🎙️ Speaking & Shadowing",
+                                if (activeSubMode == SpeakingSubMode.CHAT) "🎙️ Speaking & Shadowing" else "${activeSubMode.icon} ${activeSubMode.title}",
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = theme.textPrimary
                             )
-                            if (isLiveModeActive) {
+                            if (isLiveModeActive && activeSubMode == SpeakingSubMode.CHAT) {
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Box(
                                     modifier = Modifier
@@ -561,6 +587,7 @@ fun SpeakingRoomScreen(
                         }
                         Text(
                             when {
+                                activeSubMode != SpeakingSubMode.CHAT -> "🔥 Adrenalin Speaking Arena"
                                 isSpeaking -> "🔊 AI gapirmoqda..."
                                 isListening -> "🎙️ Sizni tinglamoqda... (gapiring)"
                                 isAiGenerating -> "⏳ AI javob tayyorlamoqda..."
@@ -587,38 +614,62 @@ fun SpeakingRoomScreen(
                     }
                 },
                 actions = {
-                    // Gemini Live Mode Toggle
+                    // Oltin Lug'at Quick Button
+                    val essentialWordsCount = remember(showVaultDialog, inspectedWord) { prefs.getSpeakingEssentialWords().size }
                     Box(
                         modifier = Modifier
                             .padding(end = 6.dp)
-                            .background(
-                                if (isLiveModeActive) Color(0xFFEF4444).copy(alpha = 0.25f) else theme.glassSurface,
-                                RoundedCornerShape(10.dp)
-                            )
-                            .border(
-                                1.5.dp,
-                                if (isLiveModeActive) Color(0xFFEF4444) else theme.glassBorderSubtleColor,
-                                RoundedCornerShape(10.dp)
-                            )
-                            .clickable {
-                                isLiveModeActive = !isLiveModeActive
-                                if (isLiveModeActive) {
-                                    userStatusNotice = "🔴 Jonli muloqot boshlandi! AI bilan navbatma-navbat erkin suhbatlashing."
-                                    startListeningSafely()
-                                } else {
-                                    speechManager.stopListening()
-                                    userStatusNotice = "Jonli muloqot to'xtatildi."
-                                }
-                            }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .background(Color(0xFFF59E0B).copy(alpha = 0.2f), RoundedCornerShape(10.dp))
+                            .border(1.dp, Color(0xFFF59E0B).copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+                            .clickable { showVaultDialog = true }
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("⭐", fontSize = 11.sp)
+                            Spacer(modifier = Modifier.width(3.dp))
                             Text(
-                                if (isLiveModeActive) "🔴 LIVE ON" else "⚪ LIVE OFF",
+                                if (essentialWordsCount > 0) "$essentialWordsCount" else "Lug'at",
                                 fontSize = 11.sp,
-                                color = if (isLiveModeActive) Color(0xFFEF4444) else theme.textPrimary,
+                                color = Color(0xFFF59E0B),
                                 fontWeight = FontWeight.Bold
                             )
+                        }
+                    }
+
+                    if (activeSubMode == SpeakingSubMode.CHAT) {
+                        // Gemini Live Mode Toggle
+                        Box(
+                            modifier = Modifier
+                                .padding(end = 6.dp)
+                                .background(
+                                    if (isLiveModeActive) Color(0xFFEF4444).copy(alpha = 0.25f) else theme.glassSurface,
+                                    RoundedCornerShape(10.dp)
+                                )
+                                .border(
+                                    1.5.dp,
+                                    if (isLiveModeActive) Color(0xFFEF4444) else theme.glassBorderSubtleColor,
+                                    RoundedCornerShape(10.dp)
+                                )
+                                .clickable {
+                                    isLiveModeActive = !isLiveModeActive
+                                    if (isLiveModeActive) {
+                                        userStatusNotice = "🔴 Jonli muloqot boshlandi! AI bilan navbatma-navbat erkin suhbatlashing."
+                                        startListeningSafely()
+                                    } else {
+                                        speechManager.stopListening()
+                                        userStatusNotice = "Jonli muloqot to'xtatildi."
+                                    }
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    if (isLiveModeActive) "🔴 LIVE ON" else "⚪ LIVE OFF",
+                                    fontSize = 11.sp,
+                                    color = if (isLiveModeActive) Color(0xFFEF4444) else theme.textPrimary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
 
@@ -651,6 +702,39 @@ fun SpeakingRoomScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
+            // Gemini AI Model Selector (gemini-3.5-flash, gemini-3.1-flash-lite, gemini-3.8-live)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                listOf(
+                    Pair(GeminiClient.MODEL_TEXT_PRIMARY, "⚡ Gemini 3.5 Flash (AI Chat)"),
+                    Pair(GeminiClient.MODEL_TEXT_PRO, "🧠 Gemini 3.1 Pro (Tahlil)"),
+                    Pair(GeminiClient.MODEL_LIVE, "🎙️ Gemini Live (Ovozli Suhbat)")
+                ).forEach { (model, label) ->
+                    val isSelected = selectedModel == model
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = {
+                            selectedModel = model
+                            if (model == GeminiClient.MODEL_LIVE) isLiveModeActive = true
+                        },
+                        label = {
+                            Text(
+                                text = label,
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = if (model == GeminiClient.MODEL_LIVE) Color(0xFFEF4444) else theme.primaryAccent,
+                            selectedLabelColor = Color.Black
+                        )
+                    )
+                }
+            }
             // Live Mode Status Banner when active
             AnimatedVisibility(visible = isLiveModeActive, enter = fadeIn(), exit = fadeOut()) {
                 Box(
@@ -687,57 +771,48 @@ fun SpeakingRoomScreen(
                 }
             }
 
-            // Scenario Chips
+            // Mode Switcher: Dialog vs Thriller Scenarios with dynamic theme accents
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(SpeakingScenarios.ALL.indices.toList()) { idx ->
-                    val scenario = SpeakingScenarios.ALL[idx]
-                    val isSelected = idx == selectedScenarioIndex
+                items(SpeakingSubMode.values()) { mode ->
+                    val isCurrent = activeSubMode == mode
                     Box(
                         modifier = Modifier
                             .background(
-                                if (isSelected) theme.primaryAccent else theme.glassSurface,
+                                if (isCurrent) mode.themeColor.copy(alpha = 0.22f) else theme.glassSurface,
                                 RoundedCornerShape(14.dp)
                             )
                             .border(
-                                1.dp,
-                                if (isSelected) theme.primaryAccent else theme.glassBorderSubtleColor,
+                                1.5.dp,
+                                if (isCurrent) mode.themeColor else theme.glassBorderSubtleColor,
                                 RoundedCornerShape(14.dp)
                             )
                             .clickable {
-                                selectedScenarioIndex = idx
+                                activeSubMode = mode
                                 speechManager.stopSpeaking()
                                 speechManager.stopListening()
-                                messages = listOf(
-                                    SpeakingMessage(
-                                        sender = "AI",
-                                        text = scenario.initialAiGreeting,
-                                        shadowingPhrase = scenario.initialAiGreeting
-                                    )
-                                )
-                                speechManager.speak(scenario.initialAiGreeting, speechRate)
                             }
-                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                            .padding(horizontal = 10.dp, vertical = 7.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(scenario.iconEmoji, fontSize = 15.sp)
+                            Text(mode.icon, fontSize = 14.sp)
                             Spacer(modifier = Modifier.width(6.dp))
                             Column {
                                 Text(
-                                    scenario.title,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isSelected) Color.Black else theme.textPrimary
+                                    mode.title,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isCurrent) FontWeight.ExtraBold else FontWeight.SemiBold,
+                                    color = if (isCurrent) mode.themeColor else theme.textPrimary
                                 )
                                 Text(
-                                    scenario.levelBadge,
+                                    mode.badge,
                                     fontSize = 9.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (isSelected) Color.Black.copy(alpha = 0.7f) else theme.primaryAccent
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isCurrent) mode.themeColor.copy(alpha = 0.85f) else theme.textSecondary
                                 )
                             }
                         }
@@ -745,68 +820,175 @@ fun SpeakingRoomScreen(
                 }
             }
 
-            // Notification / Status Banner (if error or partial speech)
-            if (userStatusNotice != null || lastError != null) {
-                val displayMsg = userStatusNotice ?: lastError ?: ""
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                        .background(theme.primaryAccent.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = displayMsg,
-                            fontSize = 11.sp,
-                            color = theme.textPrimary,
-                            modifier = Modifier.weight(1f)
-                        )
-                        // Button to launch system speech popup if needed
-                        Text(
-                            text = "Oyna 🗣️",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = theme.primaryAccent,
-                            modifier = Modifier
-                                .clickable { launchSystemSpeechDialog() }
-                                .padding(start = 8.dp)
+            if (activeSubMode != SpeakingSubMode.CHAT) {
+                val matchedQuest = ThrillerQuestData.ALL_QUESTS.firstOrNull { it.mode == activeSubMode }
+                if (matchedQuest != null) {
+                    Box(modifier = Modifier.fillMaxSize().weight(1f)) {
+                        ThrillerArenaView(
+                            quest = matchedQuest,
+                            speechManager = speechManager,
+                            onSpeechInputRequired = { onResult ->
+                                triggerSpeechListening { spoken ->
+                                    onResult(spoken)
+                                }
+                            },
+                            onFinishQuest = {
+                                activeSubMode = SpeakingSubMode.CHAT
+                            }
                         )
                     }
                 }
-            }
+            } else {
+                // Scenario Chips for standard chat
+                LazyRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(SpeakingScenarios.ALL.indices.toList()) { idx ->
+                        val scenario = SpeakingScenarios.ALL[idx]
+                        val isSelected = idx == selectedScenarioIndex
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    if (isSelected) theme.primaryAccent else theme.glassSurface,
+                                    RoundedCornerShape(14.dp)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isSelected) theme.primaryAccent else theme.glassBorderSubtleColor,
+                                    RoundedCornerShape(14.dp)
+                                )
+                                .clickable {
+                                    selectedScenarioIndex = idx
+                                    speechManager.stopSpeaking()
+                                    speechManager.stopListening()
+                                    messages = listOf(
+                                        SpeakingMessage(
+                                            sender = "AI",
+                                            text = scenario.initialAiGreeting,
+                                            shadowingPhrase = scenario.initialAiGreeting
+                                        )
+                                    )
+                                    speechManager.speak(scenario.initialAiGreeting, speechRate)
+                                }
+                                .padding(horizontal = 12.dp, vertical = 7.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(scenario.iconEmoji, fontSize = 15.sp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Column {
+                                    Text(
+                                        scenario.title,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) Color.Black else theme.textPrimary
+                                    )
+                                    Text(
+                                        scenario.levelBadge,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isSelected) Color.Black.copy(alpha = 0.7f) else theme.primaryAccent
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
 
-            // Message List
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(messages) { msg ->
-                    if (msg.sender == "USER") {
-                        // User message bubble (Right aligned)
+                // Notification / Status Banner (if error or partial speech)
+                if (userStatusNotice != null || lastError != null) {
+                    val displayMsg = userStatusNotice ?: lastError ?: ""
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .background(theme.primaryAccent.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Card(
+                            Text(
+                                text = displayMsg,
+                                fontSize = 11.sp,
+                                color = theme.textPrimary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            // Button to launch system speech popup if needed
+                            Text(
+                                text = "Oyna 🗣️",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = theme.primaryAccent,
+                                modifier = Modifier
+                                    .clickable { launchSystemSpeechDialog() }
+                                    .padding(start = 8.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Interactive Triple-Tap Tip Banner
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 3.dp)
+                        .background(Color(0xFFF59E0B).copy(alpha = 0.12f), RoundedCornerShape(10.dp))
+                        .border(1.dp, Color(0xFFF59E0B).copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                        .clickable { showVaultDialog = true }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("💡", fontSize = 13.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Istalgan so'z ustiga 3 marta bosing (yoki ushlab turing) — fonetika, tarjima va Oltin Lug'at ochiladi!",
+                        fontSize = 11.sp,
+                        color = theme.textPrimary,
+                        lineHeight = 15.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("⭐ Lug'at", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF59E0B))
+                }
+
+                // Message List
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(messages) { msg ->
+                        if (msg.sender == "USER") {
+                            // User message bubble (Right aligned)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                Card(
                                 shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp),
                                 colors = CardDefaults.cardColors(containerColor = theme.primaryAccent),
                                 modifier = Modifier.fillMaxWidth(0.85f)
                             ) {
-                                Text(
+                                TripleTapInteractiveText(
                                     text = msg.text,
                                     fontSize = 14.sp,
                                     color = Color.Black,
                                     fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.padding(12.dp)
+                                    lineHeight = 20.sp,
+                                    modifier = Modifier.padding(12.dp),
+                                    onWordTripleTapped = { word, sentence ->
+                                        inspectedWord = word
+                                        inspectedContext = sentence
+                                        inspectedSourceMode = "Mening gapim"
+                                    }
                                 )
                             }
                         }
@@ -857,10 +1039,22 @@ fun SpeakingRoomScreen(
 
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
+                                        "💡 So'zni 3 marta bosing — tahlili va Oltin Lug'at",
+                                        fontSize = 9.sp,
+                                        color = theme.primaryAccent.copy(alpha = 0.85f),
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    TripleTapInteractiveText(
                                         text = msg.text,
                                         fontSize = 14.sp,
                                         color = theme.textPrimary,
-                                        lineHeight = 20.sp
+                                        lineHeight = 20.sp,
+                                        onWordTripleTapped = { word, sentence ->
+                                            inspectedWord = word
+                                            inspectedContext = sentence
+                                            inspectedSourceMode = "AI: ${currentScenario.title}"
+                                        }
                                     )
 
                                     // Feedback in Uzbek if available
@@ -938,12 +1132,17 @@ fun SpeakingRoomScreen(
                                                 }
 
                                                 Spacer(modifier = Modifier.height(4.dp))
-                                                Text(
-                                                    "\"$shadowText\"",
+                                                TripleTapInteractiveText(
+                                                    text = shadowText,
                                                     fontSize = 13.sp,
                                                     fontWeight = FontWeight.SemiBold,
                                                     color = theme.textPrimary,
-                                                    lineHeight = 18.sp
+                                                    lineHeight = 18.sp,
+                                                    onWordTripleTapped = { word, sentence ->
+                                                        inspectedWord = word
+                                                        inspectedContext = sentence
+                                                        inspectedSourceMode = "Shadowing: ${currentScenario.title}"
+                                                    }
                                                 )
 
                                                 Spacer(modifier = Modifier.height(8.dp))
@@ -1092,150 +1291,177 @@ fun SpeakingRoomScreen(
                 }
             }
 
-            // Live Sound Wave indicator when listening or speaking
-            AnimatedVisibility(visible = isListening || isSpeaking, enter = fadeIn(), exit = fadeOut()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 2.dp)
-                        .background(
-                            if (isListening) Color(0xFFEF4444).copy(alpha = 0.15f) else theme.primaryAccent.copy(alpha = 0.15f),
-                            RoundedCornerShape(10.dp)
-                        )
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
+            if (activeSubMode == SpeakingSubMode.CHAT) {
+                // Live Sound Wave indicator when listening or speaking
+                AnimatedVisibility(visible = isListening || isSpeaking, enter = fadeIn(), exit = fadeOut()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 2.dp)
+                            .background(
+                                if (isListening) Color(0xFFEF4444).copy(alpha = 0.15f) else theme.primaryAccent.copy(alpha = 0.15f),
+                                RoundedCornerShape(10.dp)
+                            )
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
                     ) {
-                        Text(
-                            if (isListening) "🔴 Mikrofon faol: erkin gapiring..." else "🔊 AI javob bermoqda...",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isListening) Color(0xFFEF4444) else theme.primaryAccent
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            listOf(0.4f, 0.9f, 0.6f, 1.0f, 0.7f, 0.4f).forEachIndexed { i, heightFactor ->
-                                val waveHeight = ((12.dp * (if (isListening) pulseScale else 1f) * heightFactor).coerceIn(4.dp, 22.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .width(3.dp)
-                                        .height(waveHeight)
-                                        .background(
-                                            if (isListening) Color(0xFFEF4444) else theme.primaryAccent,
-                                            RoundedCornerShape(2.dp)
-                                        )
-                                )
+                            Text(
+                                if (isListening) "🔴 Mikrofon faol: erkin gapiring..." else "🔊 AI javob bermoqda...",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isListening) Color(0xFFEF4444) else theme.primaryAccent
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                listOf(0.4f, 0.9f, 0.6f, 1.0f, 0.7f, 0.4f).forEachIndexed { i, heightFactor ->
+                                    val waveHeight = ((12.dp * (if (isListening) pulseScale else 1f) * heightFactor).coerceIn(4.dp, 22.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .width(3.dp)
+                                            .height(waveHeight)
+                                            .background(
+                                                if (isListening) Color(0xFFEF4444) else theme.primaryAccent,
+                                                RoundedCornerShape(2.dp)
+                                            )
+                                    )
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            // Input Bar with Mic & Send
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = theme.glassSurface),
-                border = androidx.compose.foundation.BorderStroke(1.dp, theme.glassBorderSubtleColor)
-            ) {
-                Row(
+                // Input Bar with Mic & Send
+                Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = theme.glassSurface),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, theme.glassBorderSubtleColor)
                 ) {
-                    // Microphone button with pulse animation when listening
-                    Box(
+                    Row(
                         modifier = Modifier
-                            .size(46.dp)
-                            .scale(if (isListening) pulseScale else 1f)
-                            .background(
-                                if (isListening) Color(0xFFEF4444) else theme.primaryAccent.copy(alpha = 0.25f),
-                                CircleShape
-                            )
-                            .clickable {
-                                if (isListening) {
-                                    speechManager.stopListening()
-                                } else {
-                                    startListeningSafely()
-                                }
-                            },
-                        contentAlignment = Alignment.Center
+                            .fillMaxWidth()
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            if (isListening) "🛑" else "🎙️",
-                            fontSize = 20.sp
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(6.dp))
-
-                    // Text Field
-                    OutlinedTextField(
-                        value = inputText,
-                        onValueChange = { inputText = it },
-                        modifier = Modifier.weight(1f),
-                        placeholder = {
+                        // Microphone button with pulse animation when listening
+                        Box(
+                            modifier = Modifier
+                                .size(46.dp)
+                                .scale(if (isListening) pulseScale else 1f)
+                                .background(
+                                    if (isListening) Color(0xFFEF4444) else theme.primaryAccent.copy(alpha = 0.25f),
+                                    CircleShape
+                                )
+                                .clickable {
+                                    if (isListening) {
+                                        speechManager.stopListening()
+                                    } else {
+                                        startListeningSafely()
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
                             Text(
-                                if (isListening) "Gapiring, inglizcha yozilmoqda..." else "Inglizcha gap yozing yoki mikrofonga ayting...",
-                                fontSize = 11.sp,
-                                color = theme.textSecondary
+                                if (isListening) "🛑" else "🎙️",
+                                fontSize = 20.sp
                             )
-                        },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = theme.primaryAccent,
-                            unfocusedBorderColor = Color.Transparent,
-                            focusedTextColor = theme.textPrimary,
-                            unfocusedTextColor = theme.textPrimary
-                        ),
-                        singleLine = true
-                    )
+                        }
 
-                    Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
 
-                    // System Speech Dialog direct button (universal fallback)
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .background(theme.glassSurface, CircleShape)
-                            .border(1.dp, theme.glassBorderSubtleColor, CircleShape)
+                        // Text Field
+                        OutlinedTextField(
+                            value = inputText,
+                            onValueChange = { inputText = it },
+                            modifier = Modifier.weight(1f),
+                            placeholder = {
+                                Text(
+                                    if (isListening) "Gapiring, inglizcha yozilmoqda..." else "Inglizcha gap yozing yoki mikrofonga ayting...",
+                                    fontSize = 11.sp,
+                                    color = theme.textSecondary
+                                )
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = theme.primaryAccent,
+                                unfocusedBorderColor = Color.Transparent,
+                                focusedTextColor = theme.textPrimary,
+                                unfocusedTextColor = theme.textPrimary
+                            ),
+                            singleLine = true
+                        )
+
+                        Spacer(modifier = Modifier.width(6.dp))
+
+                        // System Speech Dialog direct button (universal fallback)
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(theme.glassSurface, CircleShape)
+                                .border(1.dp, theme.glassBorderSubtleColor, CircleShape)
                             .clickable {
                                 launchSystemSpeechDialog()
                             },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("🗣️", fontSize = 14.sp)
-                    }
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("🗣️", fontSize = 14.sp)
+                        }
 
-                    Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
 
-                    // Send Button
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .background(theme.primaryAccent, CircleShape)
-                            .clickable {
-                                sendMessage(inputText)
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "Yuborish",
-                            tint = Color.Black,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        // Send Button
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .background(theme.primaryAccent, CircleShape)
+                                .clickable {
+                                    sendMessage(inputText)
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Send,
+                                contentDescription = "Yuborish",
+                                tint = Color.Black,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }
         }
     }
+
+    // ==============================================================
+    // INTELLECTUAL WORD INSPECTOR BOTTOM SHEET & ESSENTIAL VAULT
+    // ==============================================================
+    if (inspectedWord != null) {
+        SpeakingWordIntelligenceBottomSheet(
+            targetWord = inspectedWord!!,
+            sentenceContext = inspectedContext,
+            sourceMode = inspectedSourceMode,
+            speechManager = speechManager,
+            onDismiss = { inspectedWord = null },
+            onOpenVaultSection = {
+                inspectedWord = null
+                showVaultDialog = true
+            }
+        )
+    }
+
+    if (showVaultDialog) {
+        SpeakingEssentialVaultDialog(
+            speechManager = speechManager,
+            onDismiss = { showVaultDialog = false }
+        )
+    }
+}
 }

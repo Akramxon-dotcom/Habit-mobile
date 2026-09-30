@@ -48,6 +48,8 @@ import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
@@ -108,6 +110,9 @@ import com.example.data.model.TaskTimeEngine
 import com.example.ui.HabitUiState
 import com.example.ui.screen.MonthlyEnglishPlanHomeCard
 import com.example.ui.screen.MonthlyEnglishPlanDialog
+import com.example.ui.screen.HomeworkMainDialog
+import com.example.ui.screen.HomeworkPromptDialog
+import com.example.ui.screen.HomeworkPromptTimeDialog
 import com.example.ui.theme.DesignArchetype
 import com.example.ui.theme.HabitBg
 import com.example.ui.theme.HabitBlue
@@ -145,6 +150,7 @@ fun HomeScreen(
     onDeleteScheduleItem: (String) -> Unit = {},
     onUpdateCurrentTask: (title: String, category: String, start: String, end: String, note: String, blocking: Boolean) -> Unit = { _, _, _, _, _, _ -> },
     onMarkTaskCompleted: (ScheduleItem) -> Unit = {},
+    onMarkTaskMissedAndDisciplined: (ScheduleItem, com.example.data.discipline.PunishmentType, Int) -> Unit = { _, _, _ -> },
     onUndoTaskCompleted: (ScheduleItem) -> Unit = {},
     onDelaySchedule: (minutes: Int) -> Unit = {},
     onSelectTab: (tab: Int) -> Unit = {},
@@ -159,6 +165,7 @@ fun HomeScreen(
     onSendTelegramReport: () -> Unit = {},
     onAddWordWithAi: (String) -> Unit = {},
     onDeleteVocabCard: (String) -> Unit = {},
+    onToggleVocabFavorite: (String) -> Unit = {},
     onUpdateVocabBoxLevel: (String, Int) -> Unit = { _, _ -> },
     onGenerateQuiz: (retryOnly: Boolean) -> Unit = {},
     onSubmitQuizResults: (List<String>, List<String>) -> Unit = { _, _ -> },
@@ -182,6 +189,8 @@ fun HomeScreen(
     onDeleteCustomLocation: (String) -> Unit = {},
     onToggleCustomLocation: (String, Boolean) -> Unit = { _, _ -> },
     onSaveUserGeminiApiKey: (String) -> Unit = {},
+    onToggleNotificationsEnabled: (Boolean) -> Unit = {},
+    onToggleTaskNotificationMuted: (String) -> Unit = {},
     onToggleAlarmMute: (Boolean) -> Unit = {},
     onSetAlarmVolume: (Float) -> Unit = {},
     onSetAlarmSoundTone: (String) -> Unit = {},
@@ -201,7 +210,28 @@ fun HomeScreen(
     onOpenSpeakingRoom: () -> Unit = {},
     onOpenEveningJournalCoach: () -> Unit = {},
     onOpenSmartReschedule: () -> Unit = {},
-    onOpenMurphyGrammar: () -> Unit = {}
+    onOpenMurphyGrammar: () -> Unit = {},
+    onDismissPunishmentChamber: () -> Unit = {},
+    onOpenHomeworkSheet: () -> Unit = {},
+    onCloseHomeworkSheet: () -> Unit = {},
+    onOpenHomeworkPrompt: () -> Unit = {},
+    onCloseHomeworkPrompt: () -> Unit = {},
+    onSaveHomework: (String, String) -> Unit = { _, _ -> },
+    onDeleteHomework: (String) -> Unit = {},
+    onToggleHomeworkSubTask: (String, String) -> Unit = { _, _ -> },
+    onToggleHomeworkCompleted: (String) -> Unit = {},
+    onSaveHomeworkPromptTime: (String) -> Unit = {},
+    onAddHomeworkPreset: (String) -> Unit = {},
+    onRemoveHomeworkPreset: (String) -> Unit = {},
+    onOpenAppUsageSettings: () -> Unit = {},
+    onOpenUsagePermissionSettings: () -> Unit = {},
+    onLaunchExternalApp: (String) -> Unit = {},
+    onGetTaskUsageStatus: (String, String) -> com.example.service.AppUsageStatus? = { _, _ -> null },
+    onOpenScriptStudio: () -> Unit = {},
+    onOpenPictureChallenge: () -> Unit = {},
+    onIncrementCourseraCert: () -> Unit = {},
+    onDecrementCourseraCert: () -> Unit = {},
+    onOpenMorningSchoolDialog: () -> Unit = {}
 ) {
     var showAddTaskDialog by remember { mutableStateOf(false) }
     var showDelayDialog by remember { mutableStateOf(false) }
@@ -209,6 +239,27 @@ fun HomeScreen(
     var selectedItemForDetails by remember { mutableStateOf<ScheduleItem?>(null) }
     var showEditTaskDialog by remember { mutableStateOf(false) }
     var showCustomLocationDialog by remember { mutableStateOf(false) }
+    var punishmentTargetItem by remember { mutableStateOf<ScheduleItem?>(null) }
+    var showHomeworkTimePicker by remember { mutableStateOf(false) }
+
+    val effectivePunishmentItem = punishmentTargetItem ?: state.activePunishmentItem
+    if (effectivePunishmentItem != null) {
+        val target = effectivePunishmentItem
+        PunishmentChamberScreen(
+            taskTitle = target.title,
+            taskCategory = target.category,
+            onPunishmentCompleted = { type, repsDone ->
+                onMarkTaskMissedAndDisciplined(target, type, repsDone)
+                punishmentTargetItem = null
+                onDismissPunishmentChamber()
+            },
+            onEmergencyDismiss = {
+                punishmentTargetItem = null
+                onDismissPunishmentChamber()
+            }
+        )
+        return
+    }
 
     // Form states for settings
     var rtmLatInput by remember(state.rtmLat) { mutableStateOf(state.rtmLat) }
@@ -305,6 +356,8 @@ fun HomeScreen(
                             dayType = state.dayTypeLabel,
                             isLoading = state.isLoading,
                             isAlarmMuted = state.isAlarmMuted,
+                            hasUncompletedHomework = state.todayHomework != null && !state.todayHomework.isCompleted,
+                            onOpenHomework = onOpenHomeworkSheet,
                             onToggleAlarmMute = { onToggleAlarmMute(!state.isAlarmMuted) },
                             onRefresh = onRefresh,
                             onOpenPermissions = onOpenPermissionsDialog
@@ -336,6 +389,28 @@ fun HomeScreen(
                             onDelayClick = { showDelayDialog = true },
                             onEditClick = { showEditTaskDialog = true }
                         )
+
+                        // Quick Discipline / Accountability trigger for active task
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 2.dp),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    val active = state.activeScheduleItem ?: ScheduleItem(
+                                        title = state.habitState.title.ifBlank { "Hozirgi vazifa" },
+                                        category = state.habitState.category.ifBlank { "general" },
+                                        start = state.habitState.start,
+                                        end = state.habitState.end
+                                    )
+                                    punishmentTargetItem = active
+                                }
+                            ) {
+                                Text("⚡ Erinchoqlikni jazolash (Murosasiz)", color = Color(0xFFEF4444), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
 
                     // 2b. 1 Oylik Ingliz Tili Rejasi (A2) Home Preview Card
@@ -377,6 +452,19 @@ fun HomeScreen(
                             nextPrayer = state.nextPrayer,
                             prayers = state.prayers,
                             onOpenQibla = { onSetQiblaOpen(true) }
+                        )
+                    }
+
+                    // 4b. Aileaders.uz Coursera (5 Million AI Yetakchilari) & Maktab Kuni Tracker
+                    item {
+                        AileadersCourseraTrackerCard(
+                            certsDoneToday = state.courseraCertsDoneToday,
+                            targetDaily = state.courseraTargetDaily,
+                            pricePerCert = state.courseraPricePerCert,
+                            isSchoolDay = state.isSchoolDay,
+                            onIncrementCert = onIncrementCourseraCert,
+                            onDecrementCert = onDecrementCourseraCert,
+                            onOpenSchedulePrompt = onOpenMorningSchoolDialog
                         )
                     }
 
@@ -451,6 +539,7 @@ fun HomeScreen(
                                 HabitTimelineRow(
                                     item = item,
                                     isCurrent = isCurrent,
+                                    isMuted = state.mutedTaskNotificationIds.contains(item.id),
                                     onClick = { selectedItemForDetails = item },
                                     onComplete = { taskItem ->
                                         onMarkTaskCompleted(taskItem)
@@ -539,6 +628,295 @@ fun HomeScreen(
                         }
                     }
 
+                    // English & AI Tools Grid Container (Clean 2-column non-overlapping layout)
+                    item {
+                        val theme = LocalLiquidTheme.current
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "⚡ INGLIZ TILI VA SMART LAB",
+                                    color = theme.textSecondary,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.5.sp
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color(0xFFF59E0B).copy(alpha = 0.15f),
+                                    border = BorderStroke(0.5.dp, Color(0xFFF59E0B).copy(alpha = 0.5f))
+                                ) {
+                                    Text(
+                                        text = "4 VOSITA",
+                                        color = Color(0xFFF59E0B),
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
+                                    )
+                                }
+                            }
+
+                            // Row 1: Audio Arena + STT Audio Studiya
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                // Card 1: Audio Arena
+                                Card(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { onOpenScriptStudio() },
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+                                    border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.4f))
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .background(Color(0xFFF59E0B).copy(alpha = 0.18f), CircleShape)
+                                                    .border(1.dp, Color(0xFFF59E0B).copy(alpha = 0.4f), CircleShape),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text("🎮", fontSize = 18.sp)
+                                            }
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = Color(0xFFEF4444).copy(alpha = 0.18f)
+                                            ) {
+                                                Text(
+                                                    text = "🔥 4 O'YIN",
+                                                    color = Color(0xFFEF4444),
+                                                    fontSize = 8.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Text(
+                                            text = "Audio Arena",
+                                            color = Color(0xFFF59E0B),
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "Beat Rush, Detektiv, Puzzle & Heardle",
+                                            color = theme.textSecondary,
+                                            fontSize = 10.5.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+
+                                // Card 2: STT & Ustoz Audio
+                                Card(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { onOpenScriptStudio() },
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+                                    border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.4f))
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .background(Color(0xFF38BDF8).copy(alpha = 0.18f), CircleShape)
+                                                    .border(1.dp, Color(0xFF38BDF8).copy(alpha = 0.4f), CircleShape),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text("🎙️", fontSize = 18.sp)
+                                            }
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = Color(0xFF38BDF8).copy(alpha = 0.18f)
+                                            ) {
+                                                Text(
+                                                    text = "✨ AI STT",
+                                                    color = Color(0xFF38BDF8),
+                                                    fontSize = 8.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Text(
+                                            text = "STT & Audio Studiya",
+                                            color = Color(0xFF38BDF8),
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "Ustoz audiosi tahlil & TTS ovoz",
+                                            color = theme.textSecondary,
+                                            fontSize = 10.5.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Row 2: Gemini Rasm Tasvirlash + Telegram & Shaxsiy Skriptlar
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                // Card 3: Gemini Rasm Tasvirlash
+                                Card(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { onOpenPictureChallenge() },
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+                                    border = BorderStroke(1.dp, Color(0xFFEC4899).copy(alpha = 0.4f))
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .background(Color(0xFFEC4899).copy(alpha = 0.18f), CircleShape)
+                                                    .border(1.dp, Color(0xFFEC4899).copy(alpha = 0.4f), CircleShape),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text("🖼️", fontSize = 18.sp)
+                                            }
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = Color(0xFFEC4899).copy(alpha = 0.18f)
+                                            ) {
+                                                Text(
+                                                    text = "A1-C1",
+                                                    color = Color(0xFFEC4899),
+                                                    fontSize = 8.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Text(
+                                            text = "Rasm Tasvirlash",
+                                            color = Color(0xFFEC4899),
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "Gemini 3.1 bilan rasm & tasvir",
+                                            color = theme.textSecondary,
+                                            fontSize = 10.5.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+
+                                // Card 4: Telegram Script Import & Kutubxona
+                                Card(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { onOpenScriptStudio() },
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+                                    border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.4f))
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .background(Color(0xFF10B981).copy(alpha = 0.18f), CircleShape)
+                                                    .border(1.dp, Color(0xFF10B981).copy(alpha = 0.4f), CircleShape),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text("📥", fontSize = 18.sp)
+                                            }
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = Color(0xFF10B981).copy(alpha = 0.18f)
+                                            ) {
+                                                Text(
+                                                    text = "50+ MAVZU",
+                                                    color = Color(0xFF10B981),
+                                                    fontSize = 8.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Text(
+                                            text = "Telegram & 50 Hikoya",
+                                            color = Color(0xFF10B981),
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "Telegram skriptlari & hikoyalar",
+                                            color = theme.textSecondary,
+                                            fontSize = 10.5.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Ob-havo Card (Clean summary at bottom)
                     item {
                         WeatherCard(
@@ -571,6 +949,7 @@ fun HomeScreen(
                     onAddWordWithAi = onAddWordWithAi,
                     onManualAddWord = {},
                     onDeleteWord = onDeleteVocabCard,
+                    onToggleFavorite = onToggleVocabFavorite,
                     onUpdateBoxLevel = onUpdateVocabBoxLevel,
                     onGenerateQuiz = onGenerateQuiz,
                     quizQuestions = state.quizQuestions,
@@ -587,6 +966,8 @@ fun HomeScreen(
                     onOpenSpeakingRoom = onOpenSpeakingRoom,
                     onOpenEveningCoach = onOpenEveningJournalCoach,
                     onOpenMurphy = onOpenMurphyGrammar,
+                    onOpenScriptStudio = onOpenScriptStudio,
+                    onOpenPictureChallenge = onOpenPictureChallenge,
                     modifier = Modifier.padding(innerPadding)
                 )
             }
@@ -655,6 +1036,7 @@ fun HomeScreen(
                     userApiKeyInput = userApiKeyInput,
                     onUserApiKeyChange = { userApiKeyInput = it },
                     onSaveUserGeminiApiKey = onSaveUserGeminiApiKey,
+                    onToggleNotificationsEnabled = onToggleNotificationsEnabled,
                     onToggleAlarmMute = onToggleAlarmMute,
                     onSetAlarmVolume = onSetAlarmVolume,
                     onSetAlarmSoundTone = onSetAlarmSoundTone,
@@ -696,6 +1078,38 @@ fun HomeScreen(
             onDismiss = { onSetEnglishPlanModalOpen(false) }
         )
     }
+
+    // Homework Dialogs
+    HomeworkMainDialog(
+        isOpen = state.isHomeworkSheetOpen,
+        todayHomework = state.todayHomework,
+        homeworkHistory = state.homeworkHistory,
+        promptTime = state.homeworkPromptTime,
+        onDismiss = onCloseHomeworkSheet,
+        onOpenPromptDialog = onOpenHomeworkPrompt,
+        onOpenTimePickerDialog = { showHomeworkTimePicker = true },
+        onToggleSubTask = onToggleHomeworkSubTask,
+        onToggleCompleted = onToggleHomeworkCompleted,
+        onDeleteEntry = onDeleteHomework
+    )
+
+    HomeworkPromptDialog(
+        isOpen = state.isHomeworkPromptOpen,
+        presets = state.homeworkPresets,
+        initialTopic = state.todayHomework?.topic ?: "",
+        initialText = state.todayHomework?.rawText ?: "",
+        onDismiss = onCloseHomeworkPrompt,
+        onSave = onSaveHomework,
+        onAddPreset = onAddHomeworkPreset,
+        onRemovePreset = onRemoveHomeworkPreset
+    )
+
+    HomeworkPromptTimeDialog(
+        isOpen = showHomeworkTimePicker,
+        currentTime = state.homeworkPromptTime,
+        onDismiss = { showHomeworkTimePicker = false },
+        onSaveTime = onSaveHomeworkPromptTime
+    )
 
     if (showWhyDialog) {
         val whyText = state.activeScheduleItem?.getWhyText() ?: "Kun tartibiga amal qilish — intizom va muvaffaqiyat garovi."
@@ -827,6 +1241,224 @@ fun HomeScreen(
                         color = if (item.blocking) HabitRose else HabitSage,
                         fontSize = 12.sp
                     )
+
+                    val isTaskNotifMuted = state.mutedTaskNotificationIds.contains(item.id)
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isTaskNotifMuted) Color(0xFFEF4444).copy(alpha = 0.12f) else HabitGold.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, if (isTaskNotifMuted) Color(0xFFEF4444).copy(alpha = 0.35f) else HabitGold.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onToggleTaskNotificationMuted(item.id)
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Icon(
+                                    imageVector = if (isTaskNotifMuted) Icons.Default.NotificationsOff else Icons.Default.NotificationsActive,
+                                    contentDescription = null,
+                                    tint = if (isTaskNotifMuted) Color(0xFFEF4444) else HabitGold,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = if (isTaskNotifMuted) "Bildirishnoma o'chirilgan" else "Bildirishnoma yoqilgan",
+                                        color = HabitInk,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.5.sp
+                                    )
+                                    Text(
+                                        text = if (isTaskNotifMuted) "Ushbu vazifada signal va bildirishnoma chiqmaydi" else "Vaqti kelganda eslatma va signal beriladi",
+                                        color = HabitInkSoft,
+                                        fontSize = 10.5.sp
+                                    )
+                                }
+                            }
+                            Switch(
+                                checked = !isTaskNotifMuted,
+                                onCheckedChange = { onToggleTaskNotificationMuted(item.id) },
+                                colors = switchColors()
+                            )
+                        }
+                    }
+
+                    if (item.title.contains("Uyga vazifa", ignoreCase = true) || item.category == "homework") {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = HabitGold.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, HabitGold.copy(alpha = 0.35f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    showHomeworkTimePicker = true
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    Text("⏰", fontSize = 18.sp)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column {
+                                        Text(
+                                            text = "So'rov vaqti: ${state.homeworkPromptTime}",
+                                            color = HabitInk,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.5.sp
+                                        )
+                                        Text(
+                                            text = "Uyga vazifalar so'raladigan vaqtni o'zgartirish",
+                                            color = HabitInkSoft,
+                                            fontSize = 10.5.sp
+                                        )
+                                    }
+                                }
+                                TextButton(onClick = { showHomeworkTimePicker = true }) {
+                                    Text("O'zgartirish", fontSize = 11.5.sp, color = HabitGold, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = HabitSage.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, HabitSage.copy(alpha = 0.35f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    selectedItemForDetails = null
+                                    onOpenHomeworkSheet()
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("📝", fontSize = 18.sp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "Vazifalar ro'yxati va Tarix",
+                                        color = HabitInk,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.5.sp
+                                    )
+                                    Text(
+                                        text = if (state.todayHomework != null) "Bugungi mavzu: ${state.todayHomework.topic.ifBlank { "Kiritilgan" }}" else "Hali kiritilmagan (Bosing va yozing)",
+                                        color = HabitInkSoft,
+                                        fontSize = 10.5.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // --- Ibrat / Cake App Usage Monitoring Section ---
+                    val appGoal = com.example.service.AppUsageTracker.findGoalForTask(item.title)
+                    if (appGoal != null) {
+                        val usageStatus = remember(item.id, state.isAppUsageTrackingEnabled) {
+                            onGetTaskUsageStatus(item.title, item.id)
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (usageStatus?.isFulfilled == true) Color(0xFFE8F5E9) else HabitGold.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, if (usageStatus?.isFulfilled == true) Color(0xFFA5D6A7) else HabitGold.copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(appGoal.iconEmoji, fontSize = 18.sp)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "${appGoal.displayName} monitoringi",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            color = HabitInk
+                                        )
+                                    }
+                                    TextButton(
+                                        onClick = {
+                                            selectedItemForDetails = null
+                                            onOpenAppUsageSettings()
+                                        },
+                                        contentPadding = PaddingValues(0.dp)
+                                    ) {
+                                        Text("⚙️ Sozlash", fontSize = 11.sp, color = HabitGold, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                if (!state.hasUsageStatsPermission) {
+                                    Text(
+                                        text = "⚠️ Ilovadan foydalanish vaqtini avtomatik hisoblash uchun ruxsat bering.",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFFE65100)
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    OutlinedButton(
+                                        onClick = onOpenUsagePermissionSettings,
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Text("Tizim ruxsatini yoqish", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                } else if (usageStatus != null) {
+                                    if (usageStatus.isFulfilled) {
+                                        Text(
+                                            text = "✅ Bugun: ${usageStatus.usedMinutes}/${usageStatus.requiredMinutes} daqiqa (Avtomatik bajarildi!)",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF2E7D32)
+                                        )
+                                    } else if (usageStatus.isPartiallyUsed) {
+                                        Text(
+                                            text = "⏳ Bugun: ${usageStatus.usedMinutes}/${usageStatus.requiredMinutes} daqiqa (Yana ${usageStatus.remainingMinutes} daqiqa kerak)",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = HabitInk
+                                        )
+                                    } else {
+                                        Text(
+                                            text = "📱 Telefonda: 0/${usageStatus.requiredMinutes} daqiqa (Noutbukda bajargan bo'lsangiz, tasdiqlang)",
+                                            fontSize = 11.5.sp,
+                                            color = HabitInkSoft
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = {
+                                                onLaunchExternalApp(appGoal.id)
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = HabitGold, contentColor = Color(0xFF0A0A0F)),
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                        ) {
+                                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Ilovani ochish", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             },
             confirmButton = {
@@ -841,7 +1473,15 @@ fun HomeScreen(
                 }
             },
             dismissButton = {
-                Row {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        onClick = {
+                            selectedItemForDetails = null
+                            punishmentTargetItem = item
+                        }
+                    ) {
+                        Text("❌ Bajarmadim", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                    }
                     TextButton(
                         onClick = {
                             onMarkTaskCompleted(item)
@@ -1057,6 +1697,8 @@ fun HabitHeader(
     dayType: String,
     isLoading: Boolean,
     isAlarmMuted: Boolean = false,
+    hasUncompletedHomework: Boolean = false,
+    onOpenHomework: () -> Unit = {},
     onToggleAlarmMute: () -> Unit = {},
     onRefresh: () -> Unit,
     onOpenPermissions: () -> Unit
@@ -1091,7 +1733,39 @@ fun HabitHeader(
             )
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Vazifalar (Homework & History) Header Button
+            Surface(
+                onClick = onOpenHomework,
+                modifier = Modifier
+                    .height(38.dp)
+                    .testTag("homework_header_button"),
+                shape = RoundedCornerShape(19.dp),
+                color = theme.primaryAccent.copy(alpha = 0.16f),
+                border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.45f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text("📝", fontSize = 14.sp)
+                    Text(
+                        "Vazifalar",
+                        fontSize = 12.sp,
+                        color = theme.primaryAccent,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (hasUncompletedHomework) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .background(Color(0xFFEF5350), CircleShape)
+                        )
+                    }
+                }
+            }
+
             // Master Alarm Speaker Mute/Unmute Toggle Button (Top of Home screen)
             Surface(
                 onClick = onToggleAlarmMute,
@@ -2409,6 +3083,7 @@ fun HabitSegmentHeader(segmentName: String) {
 fun HabitTimelineRow(
     item: ScheduleItem,
     isCurrent: Boolean,
+    isMuted: Boolean = false,
     onClick: () -> Unit,
     onComplete: (ScheduleItem) -> Unit = {},
     onUndo: (ScheduleItem) -> Unit = {}
@@ -2709,6 +3384,9 @@ fun HabitTimelineRow(
                             if (item.blocking) {
                                 Text("🛡️", fontSize = 11.sp)
                             }
+                            if (isMuted) {
+                                Text("🔕", fontSize = 11.sp)
+                            }
                         }
                     }
 
@@ -2832,6 +3510,49 @@ fun StatistikaTab(
                 }
             }
         }
+
+        // --- DISCIPLINE & PUNISHMENT CUMULATIVE STATS CARD ---
+        item {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val prefs = remember { com.example.data.local.HabitPreferences(context) }
+            val stats = remember { prefs.getCumulativePunishmentStats() }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = theme.glassSurfaceElevated),
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.35f))
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("💪", fontSize = 20.sp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "Jazo orqali yig'ilgan natijalar",
+                            color = Color(0xFFEF4444),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            fontFamily = FontFamily.Serif
+                        )
+                    }
+                    Text(
+                        "Kechiktirishlarni jazolash orqali to'plangan jismoniy va intellektual xazina",
+                        color = theme.textSecondary,
+                        fontSize = 11.sp
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    StatRow(label = "🦾 Jami atjimaniya (Push-up)", value = "${stats.totalPushups} ta")
+                    StatRow(label = "🦵 Jami squat (O'tirib-turish)", value = "${stats.totalSquats} ta")
+                    StatRow(label = "🧘 Jami planka vaqti", value = "${stats.totalPlankSec} soniya")
+                    StatRow(label = "🏃 Jami joyida yugurish", value = "${stats.totalRunSec} soniya")
+                    StatRow(label = "✍️ Jami yozilgan inglizcha so'zlar", value = "${stats.totalWordsTyped} ta")
+                    StatRow(label = "📝 Jami yechilgan grammatika", value = "${stats.totalGrammarPassed} ta")
+                    StatRow(label = "📖 Jami Qur'on tilovati", value = "${stats.totalTilovatMin} daqiqa")
+                    StatRow(label = "📿 Jami Astag'firulloh tasbehi", value = "${stats.totalTasbehCount} marta")
+                    StatRow(label = "⏳ Jarima ushlangan erkin vaqt", value = "${stats.totalTimeForfeitedMin} daqiqa")
+                }
+            }
+        }
     }
 }
 
@@ -2912,6 +3633,7 @@ fun TizimGpsTab(
     userApiKeyInput: String = "",
     onUserApiKeyChange: (String) -> Unit = {},
     onSaveUserGeminiApiKey: (String) -> Unit = {},
+    onToggleNotificationsEnabled: (Boolean) -> Unit = {},
     onToggleAlarmMute: (Boolean) -> Unit = {},
     onSetAlarmVolume: (Float) -> Unit = {},
     onSetAlarmSoundTone: (String) -> Unit = {},
@@ -3011,6 +3733,50 @@ fun TizimGpsTab(
                                     text = "Vazifa vaqti kelganda eslatadigan to'liq ekranli signal ovozi",
                                     color = theme.textSecondary,
                                     fontSize = 12.sp
+                                )
+                            }
+                        }
+
+                        // 0. Master Notifications Toggle Switch
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (!state.isNotificationsEnabled) Color(0xFFEF5350).copy(alpha = 0.12f) else theme.primaryAccent.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, if (!state.isNotificationsEnabled) Color(0xFFEF5350).copy(alpha = 0.35f) else theme.primaryAccent.copy(alpha = 0.3f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    Icon(
+                                        imageVector = if (!state.isNotificationsEnabled) Icons.Default.NotificationsOff else Icons.Default.NotificationsActive,
+                                        contentDescription = null,
+                                        tint = if (!state.isNotificationsEnabled) Color(0xFFEF5350) else theme.primaryAccent,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = if (state.isNotificationsEnabled) "Barcha bildirishnomalar yoqilgan" else "Bildirishnomalar o'chirilgan",
+                                            color = theme.textPrimary,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.5.sp
+                                        )
+                                        Text(
+                                            text = if (state.isNotificationsEnabled) "Faol vazifa va kun tartibi eslatmalari chiqariladi" else "Tizim paneli va ekranda eslatma bildirishnomalari to'xtatilgan",
+                                            color = theme.textSecondary,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                }
+                                Switch(
+                                    checked = state.isNotificationsEnabled,
+                                    onCheckedChange = { onToggleNotificationsEnabled(it) },
+                                    colors = switchColors()
                                 )
                             }
                         }

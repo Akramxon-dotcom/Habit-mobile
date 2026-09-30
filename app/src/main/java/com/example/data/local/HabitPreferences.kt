@@ -4,7 +4,11 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.media.AudioManager
 import com.example.data.model.HabitState
+import com.example.data.model.HomeworkEntry
+import com.example.data.model.HomeworkSubTask
 import com.example.data.model.ScheduleItem
+import com.example.data.model.ScriptDocument
+import com.example.data.model.ScriptSentenceChunk
 import com.example.data.model.TaskTimeEngine
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -58,10 +62,24 @@ class HabitPreferences(val context: Context) {
         private const val KEY_IS_BLOCKER_PAUSED = "is_blocker_paused"
         private const val KEY_USER_GEMINI_API_KEY = "user_gemini_api_key"
         private const val KEY_LAST_APPLIED_WALLPAPER_TASK_ID = "last_applied_wallpaper_task_id"
-        private const val KEY_VOCAB_VERSION = "vocab_cards_version_v3"
-        private const val CURRENT_VOCAB_VERSION = 3
-        private const val KEY_SCHEDULE_VERSION = "schedule_version_v3"
-        private const val CURRENT_SCHEDULE_VERSION = 3
+        private const val KEY_VOCAB_VERSION = "vocab_cards_version_v4"
+        private const val CURRENT_VOCAB_VERSION = 4
+        private const val KEY_SCHEDULE_VERSION = "schedule_version_v6"
+        private const val CURRENT_SCHEDULE_VERSION = 6
+
+        private const val KEY_HOMEWORK_PROMPT_TIME = "key_homework_prompt_time"
+        private const val KEY_HOMEWORK_PRESETS_JSON = "key_homework_presets_json"
+        private const val KEY_HOMEWORK_ENTRIES_JSON = "key_homework_entries_json"
+
+        private const val KEY_APP_USAGE_TRACKING_ENABLED = "key_app_usage_tracking_enabled"
+        private const val KEY_IBRAT_REQUIRED_MINUTES = "key_ibrat_required_minutes"
+        private const val KEY_CAKE_REQUIRED_MINUTES = "key_cake_required_minutes"
+        private const val KEY_SCRIPT_DOCS_JSON = "key_script_docs_json"
+        private const val KEY_COURSERA_CERTS_COUNT = "key_coursera_certs_count"
+        private const val KEY_COURSERA_CERTS_DATE = "key_coursera_certs_date"
+        private const val KEY_COURSERA_TARGET_DAILY = "key_coursera_target_daily"
+        private const val KEY_IS_SCHOOL_DAY = "key_is_school_day"
+        private const val KEY_LAST_MORNING_PROMPT_DATE = "key_last_morning_prompt_date"
 
         const val DEFAULT_BLOCKED_PACKAGES = "com.instagram.android,com.zhiliaoapp.musically,com.ss.android.ugc.trill,com.google.android.youtube"
         const val COOLDOWN_MINUTES = 30
@@ -342,6 +360,10 @@ class HabitPreferences(val context: Context) {
         prefs.edit().putInt(KEY_TIME_BANK, (cur + minutes).coerceAtLeast(0)).apply()
     }
 
+    fun saveTimeBankMinutes(minutes: Int) {
+        prefs.edit().putInt(KEY_TIME_BANK, minutes.coerceAtLeast(0)).apply()
+    }
+
     fun getStreak(): Int {
         return prefs.getInt(KEY_STREAK, 3)
     }
@@ -370,7 +392,11 @@ class HabitPreferences(val context: Context) {
     // --- Schedule Storage ---
     fun resetToDefaultSchedule(): List<ScheduleItem> {
         val todayStr = getTodayDateString()
-        val defaultList = TaskTimeEngine.getTodayPlanInfo().first
+        val defaultList = if (getIsSchoolDay()) {
+            com.example.data.model.MorningSchoolScheduleEngine.getSchoolDayPlan()
+        } else {
+            com.example.data.model.MorningSchoolScheduleEngine.getNoSchoolDayPlan()
+        }
         saveSchedule(defaultList)
         prefs.edit()
             .putString(KEY_SCHEDULE_DAY_KEY, todayStr)
@@ -396,16 +422,26 @@ class HabitPreferences(val context: Context) {
             for (i in 0 until jsonArray.length()) {
                 val obj = jsonArray.getJSONObject(i)
                 val id = obj.optString("id", java.util.UUID.randomUUID().toString())
-                val title = obj.optString("title", "")
+                var title = obj.optString("title", "")
+                var category = obj.optString("category", "general")
+                var note = obj.optString("note", "")
+
+                // Migrate legacy 4-guruh task to Uyga vazifalar
+                if (title.contains("4 guruh", ignoreCase = true) || title.contains("4-guruh", ignoreCase = true)) {
+                    title = "Uyga vazifalar"
+                    category = "homework"
+                    note = "Bugungi barcha dars va markaz uyga vazifalarini bajarish"
+                }
+
                 val isDone = isTaskDone(id) || isTaskDoneByTitle(title) || obj.optBoolean("isDone", false)
                 list.add(
                     ScheduleItem(
                         id = id,
                         title = title,
-                        category = obj.optString("category", "general"),
+                        category = category,
                         start = obj.optString("start", "00:00"),
                         end = obj.optString("end", "00:00"),
-                        note = obj.optString("note", ""),
+                        note = note,
                         blocking = obj.optBoolean("blocking", true),
                         isDone = isDone
                     )
@@ -509,6 +545,56 @@ class HabitPreferences(val context: Context) {
         saveSchedule(current)
     }
 
+    // --- Aileaders.uz Coursera Certificate & Morning School Tracking ---
+    fun getCourseraCertsDoneToday(): Int {
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val savedDate = prefs.getString(KEY_COURSERA_CERTS_DATE, "")
+        if (savedDate != today) {
+            return 0
+        }
+        return prefs.getInt(KEY_COURSERA_CERTS_COUNT, 0)
+    }
+
+    fun setCourseraCertsDoneToday(count: Int) {
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        prefs.edit()
+            .putInt(KEY_COURSERA_CERTS_COUNT, count.coerceAtLeast(0))
+            .putString(KEY_COURSERA_CERTS_DATE, today)
+            .apply()
+    }
+
+    fun getCourseraTargetDaily(): Int {
+        return prefs.getInt(KEY_COURSERA_TARGET_DAILY, 50)
+    }
+
+    fun setCourseraTargetDaily(target: Int) {
+        prefs.edit().putInt(KEY_COURSERA_TARGET_DAILY, target).apply()
+    }
+
+    fun getIsSchoolDay(): Boolean {
+        return prefs.getBoolean(KEY_IS_SCHOOL_DAY, true)
+    }
+
+    fun setIsSchoolDay(isSchool: Boolean) {
+        prefs.edit().putBoolean(KEY_IS_SCHOOL_DAY, isSchool).apply()
+    }
+
+    fun getLastMorningPromptDate(): String {
+        return prefs.getString(KEY_LAST_MORNING_PROMPT_DATE, "") ?: ""
+    }
+
+    fun setLastMorningPromptDate(dateStr: String) {
+        prefs.edit().putString(KEY_LAST_MORNING_PROMPT_DATE, dateStr).apply()
+    }
+
+    fun shouldShowMorningSchoolPrompt(): Boolean {
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val lastDate = getLastMorningPromptDate()
+        val cal = java.util.Calendar.getInstance()
+        val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+        return lastDate != today && hour >= 6
+    }
+
     fun getCachedState(): HabitState {
         return HabitState(
             title = prefs.getString(KEY_CACHED_TITLE, "") ?: "",
@@ -575,7 +661,7 @@ class HabitPreferences(val context: Context) {
             for (defCard in defaults) {
                 val matched = existingByWord[defCard.word.lowercase(java.util.Locale.ROOT)]
                 if (matched != null) {
-                    // Retain user's mastery, reviewCount, boxLevel, learnedDate
+                    // Retain user's mastery, reviewCount, boxLevel, learnedDate, favorite
                     merged.add(
                         defCard.copy(
                             id = matched.id,
@@ -583,7 +669,9 @@ class HabitPreferences(val context: Context) {
                             boxLevel = matched.boxLevel,
                             learnedDate = matched.learnedDate,
                             reviewCount = matched.reviewCount,
-                            lastReviewedEpochMs = matched.lastReviewedEpochMs
+                            lastReviewedEpochMs = matched.lastReviewedEpochMs,
+                            isFavorite = matched.isFavorite,
+                            importanceRank = if (matched.importanceRank < 9999) matched.importanceRank else defCard.importanceRank
                         )
                     )
                 } else {
@@ -600,7 +688,8 @@ class HabitPreferences(val context: Context) {
             }
 
             val sorted = merged.sortedWith(
-                compareBy<com.example.data.model.VocabCard> { com.example.data.util.VocabDocumentParser.getLevelWeight(it.level) }
+                compareBy<com.example.data.model.VocabCard> { it.importanceRank }
+                    .thenBy { com.example.data.util.VocabDocumentParser.getLevelWeight(it.level) }
                     .thenBy { it.word.lowercase(java.util.Locale.ROOT) }
             )
 
@@ -641,7 +730,9 @@ class HabitPreferences(val context: Context) {
                         isMastered = isMastered,
                         learnedDate = lDate,
                         reviewCount = obj.optInt("reviewCount", 0),
-                        lastReviewedEpochMs = obj.optLong("lastReviewedEpochMs", System.currentTimeMillis())
+                        lastReviewedEpochMs = obj.optLong("lastReviewedEpochMs", System.currentTimeMillis()),
+                        importanceRank = obj.optInt("importanceRank", 9999),
+                        isFavorite = obj.optBoolean("isFavorite", false)
                     )
                 )
             }
@@ -673,6 +764,8 @@ class HabitPreferences(val context: Context) {
                     put("learnedDate", c.learnedDate)
                     put("reviewCount", c.reviewCount)
                     put("lastReviewedEpochMs", c.lastReviewedEpochMs)
+                    put("importanceRank", c.importanceRank)
+                    put("isFavorite", c.isFavorite)
                 }
                 array.put(obj)
             }
@@ -680,6 +773,19 @@ class HabitPreferences(val context: Context) {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    fun toggleVocabCardFavorite(cardId: String): Boolean {
+        val cards = getVocabCards().toMutableList()
+        val idx = cards.indexOfFirst { it.id == cardId }
+        if (idx != -1) {
+            val current = cards[idx]
+            val updated = current.copy(isFavorite = !current.isFavorite)
+            cards[idx] = updated
+            saveVocabCards(cards)
+            return updated.isFavorite
+        }
+        return false
     }
 
     // --- Daily Active Vocabulary Batch Persistence ---
@@ -701,6 +807,45 @@ class HabitPreferences(val context: Context) {
         val arr = org.json.JSONArray()
         ids.distinct().forEach { arr.put(it) }
         prefs.edit().putString("key_today_vocab_batch_ids", arr.toString()).apply()
+    }
+
+    // --- Notifications Master & Per-Task Controls ---
+    var isNotificationsEnabled: Boolean
+        get() = prefs.getBoolean("key_notifications_master_enabled", true)
+        set(value) = prefs.edit().putBoolean("key_notifications_master_enabled", value).apply()
+
+    fun getMutedTaskNotificationIds(): Set<String> {
+        return prefs.getStringSet("key_muted_task_notifications", emptySet()) ?: emptySet()
+    }
+
+    fun isTaskNotificationMuted(taskId: String): Boolean {
+        if (taskId.isBlank()) return false
+        val set = getMutedTaskNotificationIds()
+        return set.contains(taskId)
+    }
+
+    fun setTaskNotificationMuted(taskId: String, muted: Boolean) {
+        if (taskId.isBlank()) return
+        val current = getMutedTaskNotificationIds().toMutableSet()
+        if (muted) {
+            current.add(taskId)
+        } else {
+            current.remove(taskId)
+        }
+        prefs.edit().putStringSet("key_muted_task_notifications", current).apply()
+    }
+
+    fun toggleTaskNotificationMuted(taskId: String): Boolean {
+        if (taskId.isBlank()) return false
+        val current = getMutedTaskNotificationIds().toMutableSet()
+        val willBeMuted = !current.contains(taskId)
+        if (willBeMuted) {
+            current.add(taskId)
+        } else {
+            current.remove(taskId)
+        }
+        prefs.edit().putStringSet("key_muted_task_notifications", current).apply()
+        return willBeMuted
     }
 
     // --- Alarm Sound & Volume ---
@@ -1088,5 +1233,581 @@ class HabitPreferences(val context: Context) {
         val current = getCompletedEnglishPlanTaskIds().toMutableSet()
         if (isCompleted) current.add(taskId) else current.remove(taskId)
         prefs.edit().putString("key_completed_english_plan_task_ids", current.joinToString(",")).apply()
+    }
+
+    // --- Speaking: Yodlash Shart Bo'lgan Oltin Lug'at (Essential Words) ---
+    private val KEY_SPEAKING_ESSENTIAL_WORDS = "key_speaking_essential_words_v1"
+
+    fun getSpeakingEssentialWords(): List<com.example.data.model.SpeakingEssentialWord> {
+        val raw = prefs.getString(KEY_SPEAKING_ESSENTIAL_WORDS, null) ?: return emptyList()
+        return try {
+            val array = org.json.JSONArray(raw)
+            val list = mutableListOf<com.example.data.model.SpeakingEssentialWord>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(
+                    com.example.data.model.SpeakingEssentialWord(
+                        id = obj.optString("id", java.util.UUID.randomUUID().toString()),
+                        word = obj.optString("word", ""),
+                        translation = obj.optString("translation", ""),
+                        phonetic = obj.optString("phonetic", ""),
+                        partOfSpeech = obj.optString("partOfSpeech", "noun"),
+                        level = obj.optString("level", "B1"),
+                        usageRule = obj.optString("usageRule", ""),
+                        dialogueExample = obj.optString("dialogueExample", ""),
+                        dialogueTranslation = obj.optString("dialogueTranslation", ""),
+                        synonyms = obj.optString("synonyms", ""),
+                        spokenTip = obj.optString("spokenTip", ""),
+                        sourceMode = obj.optString("sourceMode", "Speaking Room"),
+                        addedAtEpochMs = obj.optLong("addedAtEpochMs", System.currentTimeMillis()),
+                        isLearned = obj.optBoolean("isLearned", false),
+                        reviewCount = obj.optInt("reviewCount", 0)
+                    )
+                )
+            }
+            list
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    fun saveSpeakingEssentialWords(list: List<com.example.data.model.SpeakingEssentialWord>) {
+        try {
+            val array = org.json.JSONArray()
+            for (item in list) {
+                val obj = org.json.JSONObject()
+                obj.put("id", item.id)
+                obj.put("word", item.word)
+                obj.put("translation", item.translation)
+                obj.put("phonetic", item.phonetic)
+                obj.put("partOfSpeech", item.partOfSpeech)
+                obj.put("level", item.level)
+                obj.put("usageRule", item.usageRule)
+                obj.put("dialogueExample", item.dialogueExample)
+                obj.put("dialogueTranslation", item.dialogueTranslation)
+                obj.put("synonyms", item.synonyms)
+                obj.put("spokenTip", item.spokenTip)
+                obj.put("sourceMode", item.sourceMode)
+                obj.put("addedAtEpochMs", item.addedAtEpochMs)
+                obj.put("isLearned", item.isLearned)
+                obj.put("reviewCount", item.reviewCount)
+                array.put(obj)
+            }
+            prefs.edit().putString(KEY_SPEAKING_ESSENTIAL_WORDS, array.toString()).apply()
+        } catch (e: Exception) {
+            // ignore
+        }
+    }
+
+    /**
+     * Qoidaga binoan bir marta qo'shilgan so'zni qayta qo'shib bo'lmaydi!
+     * @return true agar muvaffaqiyatli yangi so'z qo'shilgan bo'lsa, false agar so'z allaqachon mavjud bo'lsa.
+     */
+    fun addSpeakingEssentialWord(word: com.example.data.model.SpeakingEssentialWord): Boolean {
+        val current = getSpeakingEssentialWords().toMutableList()
+        val alreadyExists = current.any { it.word.equals(word.word.trim(), ignoreCase = true) }
+        if (alreadyExists) {
+            return false // Qayta qo'shib bo'lmaydi
+        }
+
+        current.add(0, word)
+        saveSpeakingEssentialWords(current)
+
+        // Umumiy lug'at (VocabCard) ga ham maxsus "⭐ Nutq: Yodlash Shart" belgisi bilan sinxron qo'shamiz
+        try {
+            val allVocab = getVocabCards().toMutableList()
+            if (!allVocab.any { it.word.equals(word.word.trim(), ignoreCase = true) }) {
+                allVocab.add(
+                    0,
+                    com.example.data.model.VocabCard(
+                        id = word.id,
+                        word = word.word.trim(),
+                        translation = word.translation,
+                        phonetic = word.phonetic,
+                        partOfSpeech = word.partOfSpeech,
+                        level = word.level,
+                        definition = word.usageRule,
+                        example = word.dialogueExample,
+                        exampleTranslation = word.dialogueTranslation,
+                        synonym = word.synonyms,
+                        mnemonic = word.spokenTip,
+                        sourceDocName = "⭐ Nutq: Yodlash Shart",
+                        boxLevel = 1
+                    )
+                )
+                saveVocabCards(allVocab)
+            }
+        } catch (e: Exception) {
+            // ignore
+        }
+
+        return true
+    }
+
+    fun isSpeakingWordAlreadySaved(targetWord: String): Boolean {
+        val clean = targetWord.trim().lowercase(java.util.Locale.ROOT)
+        return getSpeakingEssentialWords().any { it.word.trim().lowercase(java.util.Locale.ROOT) == clean }
+    }
+
+    fun toggleSpeakingEssentialWordLearned(id: String): Boolean {
+        val list = getSpeakingEssentialWords().toMutableList()
+        val index = list.indexOfFirst { it.id == id }
+        if (index != -1) {
+            val item = list[index]
+            val newStatus = !item.isLearned
+            list[index] = item.copy(isLearned = newStatus)
+            saveSpeakingEssentialWords(list)
+            return newStatus
+        }
+        return false
+    }
+
+    fun deleteSpeakingEssentialWord(id: String) {
+        val list = getSpeakingEssentialWords().filterNot { it.id == id }
+        saveSpeakingEssentialWords(list)
+    }
+
+    // =========================================================
+    // DISCIPLINE & PUNISHMENT SYSTEM (Murosasiz Jazo va Statistika)
+    // =========================================================
+    private val KEY_PUNISHMENT_LAST_DATE = "key_punishment_last_date"
+    private val KEY_PUNISHMENT_DAILY_MISS_COUNT = "key_punishment_daily_miss_count"
+
+    // Cumulative stats
+    private val KEY_TOTAL_PUSHUPS = "key_stat_total_pushups"
+    private val KEY_TOTAL_SQUATS = "key_stat_total_squats"
+    private val KEY_TOTAL_PLANK_SECONDS = "key_stat_total_plank_sec"
+    private val KEY_TOTAL_RUN_SECONDS = "key_stat_total_run_sec"
+    private val KEY_TOTAL_WORDS_TYPED = "key_stat_total_words_typed"
+    private val KEY_TOTAL_GRAMMAR_PASSED = "key_stat_total_grammar_passed"
+    private val KEY_TOTAL_TILOVAT_MINUTES = "key_stat_total_tilovat_min"
+    private val KEY_TOTAL_TASBEH_COUNT = "key_stat_total_tasbeh_cnt"
+    private val KEY_TOTAL_TIME_FORFEITED = "key_stat_total_time_forfeited_min"
+
+    fun getTodayMissCount(): Int {
+        val today = getTodayDateString()
+        val lastDate = prefs.getString(KEY_PUNISHMENT_LAST_DATE, "")
+        if (lastDate != today) {
+            prefs.edit()
+                .putString(KEY_PUNISHMENT_LAST_DATE, today)
+                .putInt(KEY_PUNISHMENT_DAILY_MISS_COUNT, 0)
+                .apply()
+            return 0
+        }
+        return prefs.getInt(KEY_PUNISHMENT_DAILY_MISS_COUNT, 0)
+    }
+
+    fun incrementTodayMissCount(): Int {
+        val today = getTodayDateString()
+        val lastDate = prefs.getString(KEY_PUNISHMENT_LAST_DATE, "")
+        var current = if (lastDate == today) prefs.getInt(KEY_PUNISHMENT_DAILY_MISS_COUNT, 0) else 0
+        current += 1
+        prefs.edit()
+            .putString(KEY_PUNISHMENT_LAST_DATE, today)
+            .putInt(KEY_PUNISHMENT_DAILY_MISS_COUNT, current)
+            .apply()
+        return current
+    }
+
+    fun recordPunishmentCompleted(type: com.example.data.discipline.PunishmentType, amount: Int) {
+        val editor = prefs.edit()
+        when (type) {
+            com.example.data.discipline.PunishmentType.PUSH_UP -> {
+                val prev = prefs.getInt(KEY_TOTAL_PUSHUPS, 0)
+                editor.putInt(KEY_TOTAL_PUSHUPS, prev + amount)
+            }
+            com.example.data.discipline.PunishmentType.SQUAT -> {
+                val prev = prefs.getInt(KEY_TOTAL_SQUATS, 0)
+                editor.putInt(KEY_TOTAL_SQUATS, prev + amount)
+            }
+            com.example.data.discipline.PunishmentType.PLANK -> {
+                val prev = prefs.getInt(KEY_TOTAL_PLANK_SECONDS, 0)
+                editor.putInt(KEY_TOTAL_PLANK_SECONDS, prev + amount)
+            }
+            com.example.data.discipline.PunishmentType.RUNNING_ON_SPOT -> {
+                val prev = prefs.getInt(KEY_TOTAL_RUN_SECONDS, 0)
+                editor.putInt(KEY_TOTAL_RUN_SECONDS, prev + amount)
+            }
+            com.example.data.discipline.PunishmentType.VOCAB_DRILL,
+            com.example.data.discipline.PunishmentType.COPY_PARAGRAPH -> {
+                val prev = prefs.getInt(KEY_TOTAL_WORDS_TYPED, 0)
+                editor.putInt(KEY_TOTAL_WORDS_TYPED, prev + amount)
+            }
+            com.example.data.discipline.PunishmentType.GRAMMAR_TEST -> {
+                val prev = prefs.getInt(KEY_TOTAL_GRAMMAR_PASSED, 0)
+                editor.putInt(KEY_TOTAL_GRAMMAR_PASSED, prev + amount)
+            }
+            com.example.data.discipline.PunishmentType.QURAN_TILOVAT -> {
+                val prev = prefs.getInt(KEY_TOTAL_TILOVAT_MINUTES, 0)
+                editor.putInt(KEY_TOTAL_TILOVAT_MINUTES, prev + amount)
+            }
+            com.example.data.discipline.PunishmentType.TASBEH -> {
+                val prev = prefs.getInt(KEY_TOTAL_TASBEH_COUNT, 0)
+                editor.putInt(KEY_TOTAL_TASBEH_COUNT, prev + amount)
+            }
+            com.example.data.discipline.PunishmentType.TIME_FORFEIT,
+            com.example.data.discipline.PunishmentType.SILENCE_MEDITATION -> {
+                val prev = prefs.getInt(KEY_TOTAL_TIME_FORFEITED, 0)
+                editor.putInt(KEY_TOTAL_TIME_FORFEITED, prev + amount)
+                if (type == com.example.data.discipline.PunishmentType.TIME_FORFEIT) {
+                    val currentBank = getTimeBankMinutes()
+                    saveTimeBankMinutes((currentBank - amount).coerceAtLeast(0))
+                }
+            }
+        }
+        editor.apply()
+    }
+
+    data class PunishmentCumulativeStats(
+        val totalPushups: Int,
+        val totalSquats: Int,
+        val totalPlankSec: Int,
+        val totalRunSec: Int,
+        val totalWordsTyped: Int,
+        val totalGrammarPassed: Int,
+        val totalTilovatMin: Int,
+        val totalTasbehCount: Int,
+        val totalTimeForfeitedMin: Int
+    )
+
+    fun getCumulativePunishmentStats(): PunishmentCumulativeStats {
+        return PunishmentCumulativeStats(
+            totalPushups = prefs.getInt(KEY_TOTAL_PUSHUPS, 0),
+            totalSquats = prefs.getInt(KEY_TOTAL_SQUATS, 0),
+            totalPlankSec = prefs.getInt(KEY_TOTAL_PLANK_SECONDS, 0),
+            totalRunSec = prefs.getInt(KEY_TOTAL_RUN_SECONDS, 0),
+            totalWordsTyped = prefs.getInt(KEY_TOTAL_WORDS_TYPED, 0),
+            totalGrammarPassed = prefs.getInt(KEY_TOTAL_GRAMMAR_PASSED, 0),
+            totalTilovatMin = prefs.getInt(KEY_TOTAL_TILOVAT_MINUTES, 0),
+            totalTasbehCount = prefs.getInt(KEY_TOTAL_TASBEH_COUNT, 0),
+            totalTimeForfeitedMin = prefs.getInt(KEY_TOTAL_TIME_FORFEITED, 0)
+        )
+    }
+
+    // =========================================================
+    // HOMEWORK (UYGA VAZIFALAR) PERSISTENCE & CONFIGURATION
+    // =========================================================
+
+    fun getHomeworkPromptTime(): String {
+        return prefs.getString(KEY_HOMEWORK_PROMPT_TIME, "17:00") ?: "17:00"
+    }
+
+    fun setHomeworkPromptTime(time: String) {
+        val clean = time.trim()
+        if (clean.matches(Regex("""^([01]\d|2[0-3]):[0-5]\d$"""))) {
+            prefs.edit().putString(KEY_HOMEWORK_PROMPT_TIME, clean).apply()
+        }
+    }
+
+    fun hasPromptedHomeworkToday(): Boolean {
+        val key = "hw_prompt_answered_${getTodayDateString()}"
+        return prefs.getBoolean(key, false)
+    }
+
+    fun setHomeworkPromptAnsweredToday(answered: Boolean = true) {
+        val key = "hw_prompt_answered_${getTodayDateString()}"
+        prefs.edit().putBoolean(key, answered).apply()
+    }
+
+    fun resetHomeworkPromptToday() {
+        val key = "hw_prompt_answered_${getTodayDateString()}"
+        prefs.edit().remove(key).apply()
+    }
+
+    fun getHomeworkPresets(): List<String> {
+        val raw = prefs.getString(KEY_HOMEWORK_PRESETS_JSON, null)
+        if (raw.isNullOrBlank()) return emptyList()
+        return try {
+            val array = org.json.JSONArray(raw)
+            val list = mutableListOf<String>()
+            for (i in 0 until array.length()) {
+                val str = array.getString(i).trim()
+                if (str.isNotBlank() && !list.contains(str)) {
+                    list.add(str)
+                }
+            }
+            list
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun addHomeworkPreset(preset: String): List<String> {
+        val clean = preset.trim()
+        if (clean.isBlank()) return getHomeworkPresets()
+        val current = getHomeworkPresets().toMutableList()
+        if (!current.contains(clean)) {
+            current.add(clean)
+            val array = org.json.JSONArray()
+            current.forEach { array.put(it) }
+            prefs.edit().putString(KEY_HOMEWORK_PRESETS_JSON, array.toString()).apply()
+        }
+        return current
+    }
+
+    fun removeHomeworkPreset(preset: String): List<String> {
+        val clean = preset.trim()
+        val current = getHomeworkPresets().toMutableList()
+        if (current.remove(clean)) {
+            val array = org.json.JSONArray()
+            current.forEach { array.put(it) }
+            prefs.edit().putString(KEY_HOMEWORK_PRESETS_JSON, array.toString()).apply()
+        }
+        return current
+    }
+
+    fun getHomeworkEntries(): List<HomeworkEntry> {
+        val raw = prefs.getString(KEY_HOMEWORK_ENTRIES_JSON, null)
+        if (raw.isNullOrBlank()) return emptyList()
+        return try {
+            val array = org.json.JSONArray(raw)
+            val list = mutableListOf<HomeworkEntry>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                val id = obj.optString("id", java.util.UUID.randomUUID().toString())
+                val dateStr = obj.optString("dateStr", getTodayDateString())
+                val topic = obj.optString("topic", "")
+                val rawText = obj.optString("rawText", "")
+                val isCompleted = obj.optBoolean("isCompleted", false)
+                val createdAt = obj.optLong("createdAtEpochMs", System.currentTimeMillis())
+
+                val tasksList = mutableListOf<HomeworkSubTask>()
+                val tasksArray = obj.optJSONArray("tasks")
+                if (tasksArray != null) {
+                    for (j in 0 until tasksArray.length()) {
+                        val tObj = tasksArray.getJSONObject(j)
+                        tasksList.add(
+                            HomeworkSubTask(
+                                id = tObj.optString("id", java.util.UUID.randomUUID().toString()),
+                                text = tObj.optString("text", ""),
+                                isDone = tObj.optBoolean("isDone", false)
+                            )
+                        )
+                    }
+                }
+
+                list.add(
+                    HomeworkEntry(
+                        id = id,
+                        dateStr = dateStr,
+                        topic = topic,
+                        rawText = rawText,
+                        tasks = tasksList,
+                        isCompleted = isCompleted,
+                        createdAtEpochMs = createdAt
+                    )
+                )
+            }
+            list.sortedByDescending { it.createdAtEpochMs }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun persistHomeworkEntries(entries: List<HomeworkEntry>) {
+        try {
+            val array = org.json.JSONArray()
+            for (entry in entries) {
+                val obj = org.json.JSONObject()
+                obj.put("id", entry.id)
+                obj.put("dateStr", entry.dateStr)
+                obj.put("topic", entry.topic)
+                obj.put("rawText", entry.rawText)
+                obj.put("isCompleted", entry.isCompleted)
+                obj.put("createdAtEpochMs", entry.createdAtEpochMs)
+
+                val tasksArray = org.json.JSONArray()
+                for (task in entry.tasks) {
+                    val tObj = org.json.JSONObject()
+                    tObj.put("id", task.id)
+                    tObj.put("text", task.text)
+                    tObj.put("isDone", task.isDone)
+                    tasksArray.put(tObj)
+                }
+                obj.put("tasks", tasksArray)
+                array.put(obj)
+            }
+            prefs.edit().putString(KEY_HOMEWORK_ENTRIES_JSON, array.toString()).apply()
+        } catch (_: Exception) {
+        }
+    }
+
+    fun saveHomeworkEntry(entry: HomeworkEntry) {
+        val current = getHomeworkEntries().toMutableList()
+        val index = current.indexOfFirst { it.id == entry.id }
+        if (index >= 0) {
+            current[index] = entry
+        } else {
+            current.add(0, entry)
+        }
+        persistHomeworkEntries(current)
+    }
+
+    fun deleteHomeworkEntry(id: String) {
+        val current = getHomeworkEntries().toMutableList()
+        current.removeAll { it.id == id }
+        persistHomeworkEntries(current)
+    }
+
+    fun toggleHomeworkSubTask(entryId: String, subTaskId: String) {
+        val current = getHomeworkEntries().toMutableList()
+        val entryIndex = current.indexOfFirst { it.id == entryId }
+        if (entryIndex >= 0) {
+            val entry = current[entryIndex]
+            val updatedTasks = entry.tasks.map {
+                if (it.id == subTaskId) it.copy(isDone = !it.isDone) else it
+            }
+            val allDone = updatedTasks.isNotEmpty() && updatedTasks.all { it.isDone }
+            current[entryIndex] = entry.copy(tasks = updatedTasks, isCompleted = allDone)
+            persistHomeworkEntries(current)
+        }
+    }
+
+    fun toggleHomeworkCompleted(entryId: String) {
+        val current = getHomeworkEntries().toMutableList()
+        val entryIndex = current.indexOfFirst { it.id == entryId }
+        if (entryIndex >= 0) {
+            val entry = current[entryIndex]
+            val newCompleted = !entry.isCompleted
+            val updatedTasks = entry.tasks.map { it.copy(isDone = newCompleted) }
+            current[entryIndex] = entry.copy(isCompleted = newCompleted, tasks = updatedTasks)
+            persistHomeworkEntries(current)
+        }
+    }
+
+    fun getTodayHomework(): HomeworkEntry? {
+        val todayStr = getTodayDateString()
+        return getHomeworkEntries().firstOrNull { it.dateStr == todayStr }
+    }
+
+    // --- App Usage Tracking Settings ---
+    var isAppUsageTrackingEnabled: Boolean
+        get() = prefs.getBoolean(KEY_APP_USAGE_TRACKING_ENABLED, true)
+        set(value) = prefs.edit().putBoolean(KEY_APP_USAGE_TRACKING_ENABLED, value).apply()
+
+    var ibratRequiredMinutes: Int
+        get() = prefs.getInt(KEY_IBRAT_REQUIRED_MINUTES, 20)
+        set(value) = prefs.edit().putInt(KEY_IBRAT_REQUIRED_MINUTES, value.coerceAtLeast(1)).apply()
+
+    var cakeRequiredMinutes: Int
+        get() = prefs.getInt(KEY_CAKE_REQUIRED_MINUTES, 20)
+        set(value) = prefs.edit().putInt(KEY_CAKE_REQUIRED_MINUTES, value.coerceAtLeast(1)).apply()
+
+    // --- Script Studio (Ingliz tili diktant / transkripsiya) ---
+    fun getScriptDocuments(): List<ScriptDocument> {
+        val json = prefs.getString(KEY_SCRIPT_DOCS_JSON, null) ?: return emptyList()
+        return try {
+            val array = org.json.JSONArray(json)
+            val list = mutableListOf<ScriptDocument>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                val id = obj.optString("id", java.util.UUID.randomUUID().toString())
+                val title = obj.optString("title", "Yangi Script")
+                val dateStr = obj.optString("dateStr", getTodayDateString())
+                val audioUriStr = if (obj.has("audioUriStr") && !obj.isNull("audioUriStr")) obj.getString("audioUriStr") else null
+                val sampleAudioId = if (obj.has("sampleAudioId") && !obj.isNull("sampleAudioId")) obj.getString("sampleAudioId") else null
+                val audioTitle = obj.optString("audioTitle", "Audio")
+                val audioDurationMs = obj.optLong("audioDurationMs", 120_000L)
+                val rawText = obj.optString("rawText", "")
+                val isCompleted = obj.optBoolean("isCompleted", false)
+                val lastPositionMs = obj.optLong("lastPositionMs", 0L)
+                val targetDurationCoverageMs = obj.optLong("targetDurationCoverageMs", 0L)
+                val createdAt = obj.optLong("createdAtEpochMs", System.currentTimeMillis())
+                val updatedAt = obj.optLong("updatedAtEpochMs", System.currentTimeMillis())
+
+                val chunksList = mutableListOf<ScriptSentenceChunk>()
+                if (obj.has("chunks")) {
+                    val cArray = obj.getJSONArray("chunks")
+                    for (j in 0 until cArray.length()) {
+                        val cObj = cArray.getJSONObject(j)
+                        chunksList.add(
+                            ScriptSentenceChunk(
+                                id = cObj.optString("id", java.util.UUID.randomUUID().toString()),
+                                startTimeMs = cObj.optLong("startTimeMs", 0L),
+                                endTimeMs = cObj.optLong("endTimeMs", 0L),
+                                userText = cObj.optString("userText", ""),
+                                note = cObj.optString("note", "")
+                            )
+                        )
+                    }
+                }
+
+                list.add(
+                    ScriptDocument(
+                        id = id,
+                        title = title,
+                        dateStr = dateStr,
+                        audioUriStr = audioUriStr,
+                        sampleAudioId = sampleAudioId,
+                        audioTitle = audioTitle,
+                        audioDurationMs = audioDurationMs,
+                        rawText = rawText,
+                        chunks = chunksList,
+                        isCompleted = isCompleted,
+                        lastPositionMs = lastPositionMs,
+                        targetDurationCoverageMs = targetDurationCoverageMs,
+                        createdAtEpochMs = createdAt,
+                        updatedAtEpochMs = updatedAt
+                    )
+                )
+            }
+            list.sortedByDescending { it.updatedAtEpochMs }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun saveScriptDocument(doc: ScriptDocument) {
+        val current = getScriptDocuments().toMutableList()
+        val index = current.indexOfFirst { it.id == doc.id }
+        if (index >= 0) {
+            current[index] = doc
+        } else {
+            current.add(0, doc)
+        }
+        persistScriptDocuments(current)
+    }
+
+    fun deleteScriptDocument(id: String) {
+        val current = getScriptDocuments().toMutableList()
+        current.removeAll { it.id == id }
+        persistScriptDocuments(current)
+    }
+
+    private fun persistScriptDocuments(docs: List<ScriptDocument>) {
+        try {
+            val array = org.json.JSONArray()
+            for (doc in docs) {
+                val obj = org.json.JSONObject()
+                obj.put("id", doc.id)
+                obj.put("title", doc.title)
+                obj.put("dateStr", doc.dateStr)
+                if (doc.audioUriStr != null) obj.put("audioUriStr", doc.audioUriStr)
+                if (doc.sampleAudioId != null) obj.put("sampleAudioId", doc.sampleAudioId)
+                obj.put("audioTitle", doc.audioTitle)
+                obj.put("audioDurationMs", doc.audioDurationMs)
+                obj.put("rawText", doc.rawText)
+                obj.put("isCompleted", doc.isCompleted)
+                obj.put("lastPositionMs", doc.lastPositionMs)
+                obj.put("targetDurationCoverageMs", doc.targetDurationCoverageMs)
+                obj.put("createdAtEpochMs", doc.createdAtEpochMs)
+                obj.put("updatedAtEpochMs", doc.updatedAtEpochMs)
+
+                val cArray = org.json.JSONArray()
+                for (chunk in doc.chunks) {
+                    val cObj = org.json.JSONObject()
+                    cObj.put("id", chunk.id)
+                    cObj.put("startTimeMs", chunk.startTimeMs)
+                    cObj.put("endTimeMs", chunk.endTimeMs)
+                    cObj.put("userText", chunk.userText)
+                    cObj.put("note", chunk.note)
+                    cArray.put(cObj)
+                }
+                obj.put("chunks", cArray)
+                array.put(obj)
+            }
+            prefs.edit().putString(KEY_SCRIPT_DOCS_JSON, array.toString()).apply()
+        } catch (_: Exception) {
+        }
     }
 }

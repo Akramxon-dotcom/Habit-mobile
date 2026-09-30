@@ -47,6 +47,7 @@ data class ScheduleItem(
             "food" -> "Ovqat"
             "school" -> "Maktab"
             "rtm" -> "RTM"
+            "homework" -> "Vazifalar"
             "other" -> "Erkin"
             "night" -> "Tun"
             else -> category.replaceFirstChar { it.uppercase() }
@@ -61,6 +62,7 @@ data class ScheduleItem(
             "food" -> "🍽️"
             "school" -> "🏫"
             "rtm" -> "💻"
+            "homework" -> "📝"
             "other" -> "⏳"
             "night" -> "🌙"
             else -> "📌"
@@ -75,6 +77,7 @@ data class ScheduleItem(
             "food" -> "Yaxshi ovqatlanmasang, keyingi 3 soat samarasiz o'tadi."
             "school" -> "Bu ham kelajaging — o'tkazib bo'lmaydi."
             "rtm" -> "Bu yerda orttirgan tajriba — hozir sen uchun eng katta boylik."
+            "homework" -> "Dars va markaz vazifalarini o'z vaqtida bajarish mustaqil bilimni mustahkamlaydi."
             "other" -> "Dam olish ham reja qismi — charchoqni to'plamaslik uchun shart."
             "night" -> "Yaxshi uyqu — ertangi kunning sifatini belgilaydi."
             else -> "Kun tartibiga sodiq qolish — intizom va muvaffaqiyat garovi."

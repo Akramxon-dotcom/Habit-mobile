@@ -19,7 +19,9 @@ data class VocabCard(
     val isMastered: Boolean = false,
     val learnedDate: String = "",
     val reviewCount: Int = 0,
-    val lastReviewedEpochMs: Long = System.currentTimeMillis()
+    val lastReviewedEpochMs: Long = System.currentTimeMillis(),
+    val importanceRank: Int = 9999, // 1 to 5000+ by necessity/frequency in English
+    val isFavorite: Boolean = false // user or priority favorite
 )
 
 data class JournalEntry(
@@ -39,4 +41,22 @@ data class QuizQuestion(
     val options: List<String>,
     val correctIndex: Int,
     val explanation: String
+)
+
+data class SpeakingEssentialWord(
+    val id: String = UUID.randomUUID().toString(),
+    val word: String,
+    val translation: String,
+    val phonetic: String = "",
+    val partOfSpeech: String = "noun",
+    val level: String = "B1",
+    val usageRule: String = "",
+    val dialogueExample: String = "",
+    val dialogueTranslation: String = "",
+    val synonyms: String = "",
+    val spokenTip: String = "",
+    val sourceMode: String = "Speaking Room",
+    val addedAtEpochMs: Long = System.currentTimeMillis(),
+    val isLearned: Boolean = false,
+    val reviewCount: Int = 0
 )

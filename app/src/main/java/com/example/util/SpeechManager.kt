@@ -128,7 +128,11 @@ class SpeechManager(private val context: Context) {
                     return@post
                 }
                 currentSpeechCallback = onDone
+                
+                // Smart language detection & accent configuration
+                configureTtsForText(text, null)
                 textToSpeech?.setSpeechRate(rate)
+
                 val utteranceId = "SPEECH_${System.currentTimeMillis()}"
                 _isSpeaking.value = true
                 val result = textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
@@ -141,6 +145,158 @@ class SpeechManager(private val context: Context) {
                 _isSpeaking.value = false
                 onDone?.invoke()
             }
+        }
+    }
+
+    /**
+     * Explicitly speak text using authentic Uzbek accent / TTS engine.
+     */
+    fun speakUzbek(text: String, rate: Float = 0.90f, onDone: (() -> Unit)? = null) {
+        if (text.isBlank()) {
+            onDone?.invoke()
+            return
+        }
+
+        mainHandler.post {
+            try {
+                if (!isTtsReady || textToSpeech == null) {
+                    pendingSpeakText = text
+                    pendingSpeechRate = rate
+                    pendingSpeechCallback = onDone
+                    initTts()
+                    return@post
+                }
+                currentSpeechCallback = onDone
+                configureTtsForText(text, forceUzbek = true)
+                textToSpeech?.setSpeechRate(rate)
+
+                val utteranceId = "SPEECH_UZ_${System.currentTimeMillis()}"
+                _isSpeaking.value = true
+                val result = textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+                if (result == TextToSpeech.ERROR) {
+                    _isSpeaking.value = false
+                    onDone?.invoke()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to speak Uzbek text: ${e.message}")
+                _isSpeaking.value = false
+                onDone?.invoke()
+            }
+        }
+    }
+
+    /**
+     * Explicitly speak text using English TTS voice.
+     */
+    fun speakEnglish(text: String, rate: Float = 0.85f, onDone: (() -> Unit)? = null) {
+        if (text.isBlank()) {
+            onDone?.invoke()
+            return
+        }
+
+        mainHandler.post {
+            try {
+                if (!isTtsReady || textToSpeech == null) {
+                    pendingSpeakText = text
+                    pendingSpeechRate = rate
+                    pendingSpeechCallback = onDone
+                    initTts()
+                    return@post
+                }
+                currentSpeechCallback = onDone
+                configureTtsForText(text, forceUzbek = false)
+                textToSpeech?.setSpeechRate(rate)
+
+                val utteranceId = "SPEECH_EN_${System.currentTimeMillis()}"
+                _isSpeaking.value = true
+                val result = textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+                if (result == TextToSpeech.ERROR) {
+                    _isSpeaking.value = false
+                    onDone?.invoke()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to speak English text: ${e.message}")
+                _isSpeaking.value = false
+                onDone?.invoke()
+            }
+        }
+    }
+
+    /**
+     * Determines whether the given text is Uzbek.
+     */
+    fun isLikelyUzbekText(text: String): Boolean {
+        val clean = text.lowercase(Locale.ROOT)
+        // Cyrillic Uzbek/Russian characters
+        if (clean.any { it in '\u0400'..'\u04FF' }) return true
+
+        // Specific Uzbek characters and apostrophe variants
+        if (clean.contains("o'") || clean.contains("g'") ||
+            clean.contains("oʻ") || clean.contains("gʻ") ||
+            clean.contains("o’") || clean.contains("g’") ||
+            clean.contains("o‘") || clean.contains("g‘")
+        ) {
+            return true
+        }
+
+        // Common Uzbek functional words and grammatical suffixes
+        val uzbekMarkers = listOf(
+            "va", "bir", "bu", "uchun", "bilan", "ham", "emas", "kerak", "bo'lib", "bo'lgan",
+            "qilish", "deb", "lekin", "har", "o'z", "gap", "so'z", "kun", "ish", "tarjima",
+            "qiling", "aytmoq", "bering", "bo'lmoq", "yordam", "maqsad", "vazifa", "dars",
+            "yaxshi", "katta", "kichik", "ko'p", "kam", "inson", "odam", "til", "ingliz",
+            "o'zbek", "bormi", "yo'q", "boshqa", "barcha", "yangi", "eski", "to'g'ri", "xato",
+            "natija", "ertalab", "kechqurun", "bugun", "kecha", "ertaga", "shunday", "qanday",
+            "nimaga", "qayerda", "qachon", "kim", "nima", "qaysi", "biri", "daraja", "mashq",
+            "haqida", "to'g'risida", "yuqorisida", "orasida", "ostida", "yonida", "ichida",
+            "sababli", "tufayli", "chunki", "agar", "ammo", "biroq", "misol", "ta'rif"
+        )
+        val tokens = clean.split(Regex("[\\s.,!?;:\"'()«»]+")).filter { it.length >= 2 }
+        if (tokens.isEmpty()) return false
+        val matches = tokens.count { token ->
+            uzbekMarkers.any { marker ->
+                if (marker.length <= 3) token == marker || token.endsWith(marker)
+                else token.contains(marker)
+            }
+        }
+        return (matches.toFloat() / tokens.size.toFloat()) >= 0.20f || matches >= 1
+    }
+
+    private fun configureTtsForText(text: String, forceUzbek: Boolean?) {
+        val tts = textToSpeech ?: return
+        val isUzbek = forceUzbek ?: isLikelyUzbekText(text)
+
+        if (isUzbek) {
+            // Apply Uzbek accent / Turkic phonetic engine
+            val uzbekLocales = listOf(
+                Locale("uz", "UZ"),
+                Locale("uz"),
+                Locale("tr", "TR"), // Turkish uses near-identical phonetics for Latin text
+                Locale("tr"),
+                Locale("az", "AZ")
+            )
+            var matched = false
+            for (loc in uzbekLocales) {
+                val res = tts.setLanguage(loc)
+                if (res != TextToSpeech.LANG_MISSING_DATA && res != TextToSpeech.LANG_NOT_SUPPORTED) {
+                    matched = true
+                    break
+                }
+            }
+            if (!matched) {
+                tts.setLanguage(Locale.getDefault())
+            }
+            tts.setPitch(1.05f) // natural intonation for Uzbek speech
+        } else {
+            // Standard English
+            val englishLocales = listOf(Locale.US, Locale.UK, Locale.ENGLISH)
+            for (loc in englishLocales) {
+                val res = tts.setLanguage(loc)
+                if (res != TextToSpeech.LANG_MISSING_DATA && res != TextToSpeech.LANG_NOT_SUPPORTED) {
+                    break
+                }
+            }
+            tts.setPitch(1.0f)
         }
     }
 

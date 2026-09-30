@@ -22,7 +22,8 @@ object Oxford3000Database {
         val example: String,
         val uzExample: String,
         val synonym: String = "",
-        val phonetic: String = ""
+        val phonetic: String = "",
+        val rank: Int = 9999
     )
 
     // Curated rich vocabulary entries with complete sentences & translations
@@ -210,7 +211,13 @@ object Oxford3000Database {
             val index = mutableMapOf<String, OxfordDefinition>()
 
             try {
-                context.assets.open("oxford_3000.tsv").use { inputStream ->
+                val assetName = try {
+                    context.assets.open("oxford_5000.tsv").close()
+                    "oxford_5000.tsv"
+                } catch (e: Exception) {
+                    "oxford_3000.tsv"
+                }
+                context.assets.open(assetName).use { inputStream ->
                     BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8)).useLines { lines ->
                         var isFirst = true
                         for (line in lines) {
@@ -230,6 +237,7 @@ object Oxford3000Database {
                                 val uzExample = parts.getOrNull(5)?.trim()?.ifBlank { "'$word' so'zini har kuni inglizcha nutqda qo'llang." } ?: "'$word' so'zini har kuni inglizcha nutqda qo'llang."
                                 val synonym = parts.getOrNull(6)?.trim() ?: ""
                                 val phonetic = parts.getOrNull(7)?.trim() ?: ""
+                                val rank = parts.getOrNull(8)?.trim()?.toIntOrNull() ?: 9999
 
                                 val def = OxfordDefinition(
                                     word = word,
@@ -239,7 +247,8 @@ object Oxford3000Database {
                                     example = example,
                                     uzExample = uzExample,
                                     synonym = synonym,
-                                    phonetic = phonetic
+                                    phonetic = phonetic,
+                                    rank = rank
                                 )
                                 index[word.lowercase(Locale.ROOT)] = def
 
@@ -250,16 +259,17 @@ object Oxford3000Database {
                                         translation = uz,
                                         phonetic = phonetic,
                                         partOfSpeech = pos,
-                                        definition = "Oksford 3000™ · CEFR $level darajasi",
+                                        definition = "Oksford 5000™ · CEFR $level darajasi · #$rank Muhimlik o'rni",
                                         example = example,
                                         exampleTranslation = uzExample,
                                         synonym = synonym,
-                                        mnemonic = "CEFR $level · Oksford oltin fondi",
+                                        mnemonic = "CEFR $level · Eng kerakli so'zlar ro'yxatida #$rank o'rinda",
                                         boxLevel = 1,
                                         level = level,
-                                        sourceDocName = "The Oxford 3000™",
+                                        sourceDocName = "The Oxford 5000™",
                                         isMastered = false,
-                                        reviewCount = 0
+                                        reviewCount = 0,
+                                        importanceRank = rank
                                     )
                                 )
                             }

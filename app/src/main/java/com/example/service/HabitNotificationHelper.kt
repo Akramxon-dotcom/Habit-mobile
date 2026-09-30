@@ -34,8 +34,15 @@ object HabitNotificationHelper {
     }
 
     fun showActiveTaskNotification(context: Context) {
-        createNotificationChannel(context)
         val prefs = HabitPreferences(context)
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        if (!prefs.isNotificationsEnabled) {
+            manager.cancel(NOTIFICATION_ID)
+            return
+        }
+
+        createNotificationChannel(context)
         val schedule = prefs.getSchedule()
         val cached = prefs.getCachedState()
         val active = TaskTimeEngine.findActiveScheduleItem(schedule)
@@ -55,9 +62,7 @@ object HabitNotificationHelper {
             else -> null
         }
 
-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-        if (item == null) {
+        if (item == null || prefs.isTaskNotificationMuted(item.id)) {
             manager.cancel(NOTIFICATION_ID)
             return
         }

@@ -22,15 +22,15 @@ data class NextPrayerInfo(
 )
 
 object PrayerTimeEngine {
-    // Marg'ilon default prayer times
+    // Marg'ilon kuz-qish mavsumi namoz vaqtlari
     fun getMargilonPrayers(): List<PrayerTime> {
         return listOf(
-            PrayerTime("fajr", "Bomdod", "04:45", "🌅"),
-            PrayerTime("sunrise", "Quyosh", "06:10", "☀️"),
-            PrayerTime("dhuhr", "Peshin", "12:35", "☀️"),
-            PrayerTime("asr", "Asr", "16:45", "🌤️"),
-            PrayerTime("maghrib", "Shom", "18:50", "🌇"),
-            PrayerTime("isha", "Xufton", "20:20", "🌙")
+            PrayerTime("fajr", "Bomdod", "05:00", "🌅"),
+            PrayerTime("sunrise", "Quyosh", "06:15", "☀️"),
+            PrayerTime("dhuhr", "Peshin", "12:25", "☀️"),
+            PrayerTime("asr", "Asr", "16:15", "🌤️"),
+            PrayerTime("maghrib", "Shom", "17:59", "🌇"),
+            PrayerTime("isha", "Xufton", "19:13", "🌙")
         )
     }
 
@@ -74,7 +74,7 @@ object PrayerTimeEngine {
         // Agar barchasi o'tgan bo'lsa, ertangi bomdod
         val fajr = prayers.first()
         val parts = fajr.time.split(":")
-        val pMin = (parts.getOrNull(0)?.toIntOrNull() ?: 4) * 60 + (parts.getOrNull(1)?.toIntOrNull() ?: 45)
+        val pMin = (parts.getOrNull(0)?.toIntOrNull() ?: 5) * 60 + (parts.getOrNull(1)?.toIntOrNull() ?: 0)
         val diff = ((24 * 60 - nowMin) + pMin).toLong()
         val h = diff / 60
         val m = diff % 60

@@ -57,6 +57,9 @@ val HabitErrorBg = HabitRoseGlow
 val HabitWarning = HabitAmber
 val HabitCyan = HabitBlue
 val HabitCyanGlow = HabitBlueGlow
+val HabitGreenSuccess = HabitSage
+val HabitRedBurgundy = HabitRose
+val HabitPurpleVoice = HabitPurple
 val HabitGoldLight = Color(0xFF4ADE80)
 val HabitGlassBg = Color(0xDD111118)
 
